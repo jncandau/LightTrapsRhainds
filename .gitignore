@@ -1,0 +1,6 @@
+Rproj.user
+.quarto/
+/_site/
+venv/
+.env
+*.csv

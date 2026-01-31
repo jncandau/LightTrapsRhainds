@@ -1,0 +1,707 @@
+---
+title: Lanscape-scale variations in SBW flight phenology
+author: Jean-Noel Candau
+execute:
+  cache: true
+  echo: false
+  warning: false
+format:
+   html:
+     embed-resources: true
+engine: knitr
+---
+
+```{r preamble, message=FALSE}
+#| echo: false
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(diptest)
+library(gridExtra)
+# library(BioSIM)
+library(fitdistrplus)
+library(sf)
+library(rnaturalearth)
+library(ggspatial)
+library(reldist)
+library(broom)
+library(gtsummary)
+
+###########################################
+# Some functions
+###########################################
+doy_to_date.f <- function(DOY,year) {
+  origin <- as.Date(paste0(year - 1, "-12-31"))
+  return(as.character(origin + DOY))
+}
+
+date_to_doy.f <- function(year,month,day) {
+  DOY <- as.integer(format(as.Date(paste(year, month, day, sep = "-")), "%j"))
+  return(DOY)
+}
+
+```
+
+# Light trap data
+
+```{r trap-data, message=FALSE}
+#| echo: false
+
+###########################################
+### Read flight data from Marc's files
+###########################################
+# Identify record source based on ID last digit
+#   0: Original files 1-7 from Marc
+#   1: Maritimes light trap catches
+#   2: Last batch of files recovered by Marc
+# Records were selected based on a set of criteria
+# Criteria #1: at least 30 moths captured in total
+# Criteria #2: at least one survey record of absence before emergence
+# According to Marc: Among the site*year that Criteria #2 would eliminate, several are very close to 0
+# or have 0 but it wasn't entered. Based on his information, Marc made the following list of site*year
+# to eliminate
+# Marc.Eliminate <- c("4599667572","4668604372","4544634673","4614659173","4614659175","4487673677",
+#               "4665683977","4708689378","4742673478","4589699779")
+# Criteria #3: more than 10 survey dates
+# Criteria #4: No more than 30% of the total sample size was trapped in one single day 
+# After Discussion with Marc in March 2017, it was decided to increase the limit of max sumday to 50% of
+# population caught but the duration of the flight has to be > 6 days to limit the risk of having
+# migration flights 
+
+Obs <- read.csv2("Observations.csv")
+# Relocate a trap that appears in the ocean
+Obs <- Obs %>%
+  mutate(lat = if_else(lat == 46.38, 46.40, lat),
+  year <- as.factor(year))
+
+# Remove traps for which there are too many values at exactly 100
+Trap.too.many.100 <- c("4594666473","4521673080","4561649880","4588674680","4594666480","4636635080","4689674080","4708656980")
+
+# Remove traps with fitted duration less than 7 or more than 21 days
+Trap.bad.duration <- c("4543677472","4588674676","4613687275","4487673673","4594666478","4689674078","4497701680","4588674674","4441685974","4697688775","4594666474","4708656978","4547635879","4543677478","4613687278","4666687375","4497701674","4636635076","4589699778","4638640473","4543677475","4708656972","4517704772","4708656973","4536694380","4387700280","4661695279","4640634075","4561649872","4441652277","4487673676","4636635079","4708656974","4661695276","4583620277","4797664679","4697688773","4487673672","4547635876","4487673675","4530685272","4561649878","4547695976")
+
+Obs <- Obs %>% dplyr::filter(! id %in% c(Trap.too.many.100,Trap.bad.duration))
+```
+
+```{r}
+
+n_per_year <- Obs %>% dplyr::select(year,id) %>% distinct() %>% group_by(year) %>% summarize(n=length(id))
+
+```
+We retrieved light trap data collected between 1972 and 1980 in Atlantic Canada from the archive room at the Atlantic Forestry Centre in Fredericton. Most of the data originated from two sources: (1) a broad scale survey of SBW using light traps in Atlantic Canada (Hurley and Titus 1987); (2) annual reports of the Maine State Department of Forest, in particular a multiyear summary including detailed maps and tables (Weed 1977). We approximated the geographic location of experimental sites to the nearest 0.01 latitudinal and longitudinal degrees (@maptraps). The light source used to attract SBW generally consisted of a Coleman lantern powered by naphtha gas and operated from sunset until dawn. The light source was placed at the center of two crossing vanes that deflected the moths down toward a funnel into the trap; a strip of insecticide at the bottom of the trap killed captured insects (Fig. 1 in Hurley and Titus 1987). Rothamsted light traps (Williams 1939) were also used at some locations in Maine. Light traps at most sites were deployed within forest stands 3 to 6 m above ground. All sites included SBW host trees as dominant or co-dominant species; due to the age of the data, the composition of the forest stands cannot be precisely determined.
+
+At each location, the light traps were inspected daily to collect the moths which were then placed in a paper bag labelled by date-site and transferred in a freezer within 24 hours; for \< 0.5% of individual observations, traps were revised every second or third day. The moths were sorted for each collection bag to separate SBW from other species (‘by-catch’) and determine the number of SBW adults; due to time constraints, the gender of SBW was not determined. The number of SBW adults for most collections was determined by counting the number of individuals. In instances of extreme SBW abundance (\> 1000 individuals), the number of adults was assessed either by counting and weighing a subsample of adults, or by approximating the number of adults by groups of 100 individuals.
+
+```{r}
+#| label: maptraps
+#| fig-cap: "Map of trap locations by year"
+
+Traps.location <- Obs %>%
+  dplyr::select(year,lat,long) %>%
+  distinct()
+
+# Get provinces and states
+canada <- ne_states(country = "canada", returnclass = "sf")
+usa <- ne_states(country = "united states of america", returnclass = "sf")
+
+# Filter for Eastern regions
+eastern_canada <- canada |> filter(longitude > -85 & longitude < -55)
+eastern_usa <- usa |> filter(longitude > -85 & longitude < -55)
+
+# Get centroids for labels
+canada_labels <- eastern_canada |> 
+  st_centroid() |> 
+  st_coordinates() |> 
+  as.data.frame() |> 
+  bind_cols(name = eastern_canada$name)
+
+usa_labels <- eastern_usa |> 
+  st_centroid() |> 
+  st_coordinates() |> 
+  as.data.frame() |> 
+  bind_cols(name = eastern_usa$name)
+
+# Create map
+ggplot() +
+  geom_sf(data = eastern_canada, fill = "lightgray", color = "white") +
+  geom_sf(data = eastern_usa, fill = "lightgray", color = "white") +
+  geom_text(data = canada_labels, aes(x = X, y = Y, label = name), size = 3.5) +
+  geom_text(data = usa_labels, aes(x = X, y = Y, label = name), size = 3.5) +
+  geom_point(data = Traps.location, 
+             aes(x = long, y = lat),
+             color = "red", size = 2, alpha = 0.7) +
+  coord_sf(xlim = c(-72, -62), ylim = c(44, 48)) +
+  facet_wrap(~year) +
+  labs(
+ #   title = "Trap Locations by Year",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  annotation_scale(location = "br", width_hint = 0.2) +
+  theme_bw()
+
+```
+
+The data set included in this analysis contains only sites for which \> 29 adults were collected over an interval of at least 30 nights. The number of locations each year is as follows: N = `r n_per_year %>% dplyr::filter(year==1972) %>% pull(n)` in 1972, N = `r n_per_year %>% dplyr::filter(year==1973) %>% pull(n)` in 1973, N = `r n_per_year %>% dplyr::filter(year==1974 %>% pull(n))` in 1974, N = `r n_per_year %>% dplyr::filter(year==1975) %>% pull(n)`  in 1975, N = `r n_per_year %>% dplyr::filter(year==1976) %>% pull(n)` in 1976, N = `r n_per_year %>% dplyr::filter(year==1977) %>% pull(n)` in 1977, N = `r n_per_year %>% dplyr::filter(year==1978) %>% pull(n)` in 1978, N = `r n_per_year %>% dplyr::filter(year==1979) %>% pull(n)` in 1979, N = `r n_per_year %>% dplyr::filter(year==1980) %>% pull(n)` in 1980.
+
+# Characterization of flight season
+
+```{r obs-logistic}
+#| echo: false
+# Fit logistic curves for each id
+logistic_fits <- Obs |>
+  group_by(id) |>
+  summarize(
+    # Fit logistic to Obs.cumsum
+    obs_fit = list(tryCatch(
+      nls(sumday.cumsum ~ SSlogis(date, Asym, xmid, scal),
+        control = nls.control(tol = 1e-9),
+        start=list(Asym=1,xmid=195,scal=3),
+        algorithm = "port",
+        lower=c(Asym=0.96,xmid=165,scal=0),
+        upper=c(Asym=1.05,xmid=210,scale=10)),
+      error = function(e) NULL
+    )),
+    .groups = "drop"
+  ) |>
+  mutate(
+    # Extract parameters for Obs
+    obs_params = map(obs_fit, ~if(!is.null(.x)) tidy(.x) else NULL)
+  )
+
+# Extract the midpoint (xmid) parameter for each curve
+inv_logis.f <- function(y,params) {
+  Asym <- params$estimate[1]
+  xmid <- params$estimate[2]
+  scal <- params$estimate[3]
+  xmid - scal * log(Asym/y - 1)
+}
+logistic.points <- logistic_fits %>%
+  mutate(
+    obs_5p = map_dbl(obs_params, ~if(!is.null(.x)) inv_logis.f(0.05,.x) else NA_real_),
+    obs_midpoint = map_dbl(obs_params, ~if(!is.null(.x)) .x$estimate[.x$term == "xmid"] else NA_real_),
+    obs_95p = map_dbl(obs_params, ~if(!is.null(.x)) inv_logis.f(0.95,.x) else NA_real_)
+ ) %>%
+  mutate(obs_duration=obs_95p-obs_5p) %>%
+  dplyr::select(id, obs_5p,obs_midpoint,obs_95p,obs_duration) %>% 
+  dplyr::filter(if_any(.cols = c("obs_5p","obs_midpoint","obs_95p"), ~ !is.na(.))) %>% 
+  left_join(Obs) %>% dplyr::select(id,obs_5p,obs_midpoint,obs_95p,obs_duration,year,lat,long,src) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  mutate(year=as.factor(year)) %>%
+  ungroup()
+```
+
+Across all the traps and years, the mean 5th and 95th percentiles of the flight periods are `r format(as.Date(doy_to_date.f(mean(logistic.points$obs_5p,na.rm=TRUE),1978)),"%B %d")` (sd=`r round(sd(logistic.points$obs_5p,na.rm=TRUE),digit=1)` days) and `r format(as.Date(doy_to_date.f(mean(logistic.points$obs_95p,na.rm=TRUE),1978)),"%B %d")` (sd=`r round(sd(logistic.points$obs_5p,na.rm=TRUE),digit=1)` days), respectively. The median flight date is `r format(as.Date(doy_to_date.f(mean(logistic.points$obs_midpoint,na.rm=TRUE),1978)),"%B %d")` (sd=`r round(sd(logistic.points$obs_midpoint,na.rm=TRUE),digit=1)`) and the duration of a flight season (i.e., number of days between the 5th and 9th percentile) `r round(mean(logistic.points$obs_duration,na.rm=TRUE),digit=1)` (sd=`r round(sd(logistic.points$obs_duration,na.rm=TRUE),digit=1)`) with a minimum of `r round(min(logistic.points$obs_duration,na.rm=TRUE),digit=1)` and a maximum of `r round(max(logistic.points$obs_duration,na.rm=TRUE),digit=1)` days.
+
+```{r,show=FALSE}
+#| label: tbl-regressions
+#| tbl-cap: "Effects of latitude, longitude and year on flight period descriptors"
+
+t1 <- tbl_regression(lm(obs_5p~lat+long+lat*long+year,data=logistic.points))
+t2 <- tbl_regression(lm(obs_midpoint~lat+long+lat*long+year,data=logistic.points))
+t3 <- tbl_regression(lm(obs_95p~lat+long+lat*long+year,data=logistic.points))
+t4 <- tbl_regression(lm(obs_duration~lat+long+lat*long+year,data=logistic.points))
+
+tbl_merge(
+  list(t1, t2, t3, t4),
+  tab_spanner = c("5th percentile", "50th percentile", "95th percentile", "duration")
+)
+```
+
+The flight phenology described by the date of the 5th, 50th and 95th percentile of trap captures is affected by the year but not by latitude or longitude at the spatial scale of our study (@tbl-regressions). There is no significant effect of latitude, longitude, or year on the duration of the flight season. 
+
+```{r}
+#| label: flight-period
+#| fig-cap: "Period of flight (5th, 50th and 95th percentiles of fitted observations)"
+#| 
+
+log.temp <- logistic.points %>%
+  mutate(year = fct_relevel(year,as.character(1972:1980))) %>%
+  group_by(year) %>%
+  arrange(obs_midpoint) %>%
+  mutate(id2=1:n())
+
+log.mean.mid <- log.temp %>%
+  group_by(year) %>%
+  summarise(midmean=mean(obs_midpoint))
+
+ggplot(log.temp,aes(x=obs_midpoint,y=id2)) + 
+      geom_point(col="red",size=2) +
+            geom_point(aes(x=obs_5p)) +
+                    geom_point(aes(x=obs_95p)) +
+                              geom_segment(aes(x=obs_5p,xend=obs_95p,yend=id2)) +
+                                        geom_vline(data=log.mean.mid,aes(xintercept=midmean),col="blue") +
+                                                    facet_grid(rows=vars(year)) +
+                                                                  ylab("Trap") + xlab("DOY")
+
+```
+
+The annual median of the flight period (annual mean of 50th percentile for each trap) can vary by up to 12 days (@flight-period). The flight season was relatively early in 1975 and 1976, and late in 1974. We hypothesize that the inter-annual differences are driven by temperature before July 1st.     
+
+# Effects of spring temperature on the start of the flight season
+
+::: {layout-ncol=1}
+```{r}
+#| label: tbl-springT
+#| tbl-cap: "Effect of annual degree-days on flight start date"
+#| 
+
+# library(openmeteo)
+# Obs.T <- do.call("rbind",lapply(ids,function(i) {
+#   year <- paste0("19",substr(i,9,10))
+#   lat <- as.integer(substr(i,1,4))/100
+#   lon <- as.integer(substr(i,5,8))/100*-1
+#   weather_history(location = c(lat,lon),
+#     start = paste0(year,"-01-01"),
+#     end = paste0(year,"-12-31"),
+#     hourly="temperature_2m") %>% mutate(id=i)
+# }))
+# write.csv2(Obs.T,file="2m_temperature_at_sites.csv")
+
+# Obs.T <- read.csv2("2m_temperature_at_sites.csv")
+
+# Calculate DD over 5C
+# Obs.DD <- Obs.T %>% 
+#   mutate(DOY=yday(datetime)) %>%
+#   dplyr::filter(DOY < 172) %>%
+#   summarise(
+#     T=mean(hourly_temperature_2m,na.rm=TRUE),
+#     .by=c(id,DOY)
+#   ) %>% 
+#   summarise(
+#     ERA_DD=sum(ifelse(T>5,T,0)),
+#     .by=c(id)
+#   )
+# write.csv2(Obs.DD,file="Obs.DD.csv")
+
+Obs.DD <- read.csv2("Obs.DD.csv")
+
+logistic.points <- logistic.points %>% 
+  left_join(Obs.DD)
+
+tbl_regression((lm(obs_5p~ERA_DD,data=logistic.points))) %>%
+   add_glance_source_note(include = c(r.squared, nobs))
+```
+```{r}
+#| label: fig-springT
+#| fig-cap: "Effect of annual degree-days on flight start date"
+#| 
+
+ggplot(logistic.points,aes(x=ERA_DD,y=obs_5p)) +
+    geom_point() +
+      geom_smooth(method = "lm", se = TRUE, color = "blue") +
+      xlab("Degree days over 5C from January 1st to June 21st") +
+      ylab("DOY of 5th percentile trap captures")
+
+```
+
+A significant effect of year on flight phenology suggests that spring temperature may affect the start of the flight season. To test this hypothesis, we retrieved daily temperature data from the ERA5-Land dataset for each year at each trap location and calculated the degree-days over 5C from January 1st to June 21st (summer solstice). The number of degree days has a significant but weak effect on the flight start date (@tbl-springT,@fig-springT).
+
+# Validation of a phenology model
+
+```{r}
+#| label: biosim-run
+
+# The R BioSIM package does not have the option to set the starting sink.number
+# of L2o, the default is 100. We want 1000 so we run the simualtions 10 times.
+# We checked that the seed is different at every run, so we don't have 10 times the
+# same results
+
+####################################################################################
+# Run BioSIM
+####################################################################################
+# ids <- unique(Obs$id)
+# for (i in 1:10) {
+# Biosim.pred <- do.call("rbind",lapply(ids,function(i){
+#   year <- as.integer(paste0("19",substr(i,9,10)))
+#   lat <- as.integer(substr(i,1,4))/100
+#   lon <- as.integer(substr(i,5,8))/100*-1
+#   generateWeather(modelNames = "Spruce_Budworm_Biology",
+#                   fromYr = year,
+#                   toYr = year,
+#                   id = i,
+#                   latDeg = lat,
+#                   longDeg = lon,
+#                 )$Spruce_Budworm_Biology
+# }))
+# write.csv2(Biosim.pred,file=paste0("Biosim.pred_",i,".csv"))
+# }
+
+Biosim.pred <- do.call("rbind",lapply(1:10,function(i) read.csv2(file=paste0("Biosim.pred_",i,".csv"))))
+
+# Sum the 10 runs for each trap and day
+# Calculate the cumulative sum of percent flight
+# Reduce the times series to Jun 15th to Aug 31st
+Biosim.pred <- Biosim.pred %>%
+  mutate(DOY = as.integer(format(as.Date(paste(Year, Month, Day, sep = "-")), "%j"))) %>%
+  arrange(KeyID,DOY) %>%
+  dplyr::select(KeyID,Latitude,Longitude,Year,Month,Day,DOY,L2o,MalePupae,FemalePupae,
+    MaleAdult,FemaleAdult,MaleEmergence,FemaleEmergence,MaleFlight,FemaleFlight) %>%
+  group_by(KeyID,DOY) %>%
+  summarise(across(L2o:FemaleFlight,\(x) sum(x)/10)) %>%
+  mutate(Adult.Flight = MaleFlight+FemaleFlight) %>%
+  ungroup() %>%
+  group_by(KeyID) %>%
+  dplyr::filter(DOY > 165 & DOY < 244) %>%
+  mutate(Year = paste0("19",substr(KeyID,9,10)),
+      Biosim.cumsum = cumsum(Adult.Flight/(sum(Adult.Flight)))) %>%
+  ungroup() %>%
+  rename(id=KeyID,date=DOY) %>%
+  dplyr::select(id,Year,date,Adult.Flight,Biosim.cumsum)  
+```
+
+
+```{r}
+#| label: biosim-logistic
+
+logistic_biosim <- Biosim.pred |>
+  group_by(id) |>
+  summarize(
+    # Fit logistic to Obs.cumsum
+    bio_fit = list(tryCatch(
+      nls(Biosim.cumsum ~ SSlogis(date, Asym, xmid, scal),
+        control = nls.control(tol = 1e-9),
+        start=list(Asym=1,xmid=195,scal=3),
+        algorithm = "port",
+        lower=c(Asym=0.96,xmid=165,scal=0),
+        upper=c(Asym=1.05,xmid=243,scale=10)),
+      error = function(e) NULL
+    )),
+    .groups = "drop"
+  ) |>
+  mutate(
+    # Extract parameters for Obs
+    bio_params = map(bio_fit, ~if(!is.null(.x)) tidy(.x) else NULL)
+  )
+
+# Eliminate problematic fits
+logistic_biosim <- logistic_biosim %>% dplyr::filter(!sapply(bio_fit, \(x) is.null(x[[1]])))
+
+biosim.points <- logistic_biosim %>%
+  mutate(
+    bio_5p = map_dbl(bio_params, ~if(!is.null(.x)) inv_logis.f(0.05,.x) else NA_real_),
+    bio_midpoint = map_dbl(bio_params, ~if(!is.null(.x)) .x$estimate[.x$term == "xmid"] else NA_real_),
+    bio_95p = map_dbl(bio_params, ~if(!is.null(.x)) inv_logis.f(0.95,.x) else NA_real_)
+ ) %>%
+  mutate(bio_duration=bio_95p-bio_5p) %>%
+  dplyr::select(id, bio_5p,bio_midpoint,bio_95p,bio_duration)
+
+compare.points <- inner_join(logistic.points,biosim.points) %>%
+  dplyr::select(-X) %>%
+  mutate(
+    obs_bio_5p = obs_5p - bio_5p,
+    obs_bio_midpoint = obs_midpoint - bio_midpoint,
+    obs_bio_95p = obs_95p - bio_95p,
+    obs_bio_duration = obs_duration - bio_duration
+  )
+```
+
+```{r}
+#| label: fig-compare-lm
+#| fig-cap: "Observed vs predicted flight phenology"
+#| 
+
+p1 <- ggplot(compare.points,aes(x=obs_5p,y=bio_5p)) + 
+    geom_point(aes(color=year)) +
+    geom_abline() +
+    geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
+    labs(
+      title = "DOY of 5th percentile trap capture",
+      x = "Observed DOY",
+      y = "Predicted DOY"
+    ) 
+
+p2 <- ggplot(compare.points,aes(x=obs_midpoint,y=bio_midpoint)) + 
+  geom_point(aes(color=year)) +
+  geom_abline() +
+  geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
+  labs(
+      title = "DOY of median trap capture",
+      x = "Observed DOY",
+      y = "Predicted DOY"
+  ) 
+p3 <- ggplot(compare.points,aes(x=obs_95p,y=bio_95p)) + 
+  geom_point(aes(color=year)) +
+  geom_abline() +
+  geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
+  labs(
+      title = "DOY of 95th percentile trap capture",
+      x = "Observed DOY",
+      y = "Predicted DOY"
+  ) 
+p4 <- ggplot(compare.points,aes(x=obs_duration,y=bio_duration)) + 
+  geom_point(aes(color=year)) +
+  geom_abline() +
+  geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
+  labs(
+      title = "Trap capture duration",
+      x = "Observed (days)",
+      y = "Predicted (days)"
+  ) 
+
+marrangeGrob(list(p1,p2,p3,p4),ncol=2,nrow=2)
+```
+```{r}
+#| label: fig-compare-hist
+#| fig-cap: "Observed vs predicted flight phenology"
+#| 
+
+m <- mean(compare.points$obs_bio_5p)
+s <- sd(compare.points$obs_bio_5p)
+p1 <- ggplot(compare.points,aes(x=obs_bio_5p)) + 
+  geom_histogram(bins = 10, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = m, color = "red", linewidth = 1) +
+  geom_vline(xintercept = c(m - s, m + s), color = "red", linetype = "dashed") +
+  annotate("text", x = m, y = Inf, label = paste("Mean =", round(m, 1)), 
+           vjust = 2, hjust = -0.1, color = "red") +
+  annotate("text", x = m, y = Inf, label = paste("SD =", round(s, 1)), 
+           vjust = 4, hjust = -0.1, color = "red") +
+            xlab("5th percentile observations - predicted")
+
+m <- mean(compare.points$obs_bio_midpoint)
+s <- sd(compare.points$obs_bio_midpoint)
+p2 <- ggplot(compare.points,aes(x=obs_bio_midpoint)) + 
+  geom_histogram(bins = 10, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = m, color = "red", linewidth = 1) +
+  geom_vline(xintercept = c(m - s, m + s), color = "red", linetype = "dashed") +
+  annotate("text", x = m, y = Inf, label = paste("Mean =", round(m, 1)), 
+           vjust = 2, hjust = -0.1, color = "red") +
+  annotate("text", x = m, y = Inf, label = paste("SD =", round(s, 1)), 
+           vjust = 4, hjust = -0.1, color = "red") +
+            xlab("50th percentile observations - predicted")
+
+m <- mean(compare.points$obs_bio_95p)
+s <- sd(compare.points$obs_bio_95p)
+p3 <- ggplot(compare.points,aes(x=obs_bio_5p)) + 
+  geom_histogram(bins = 10, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = m, color = "red", linewidth = 1) +
+  geom_vline(xintercept = c(m - s, m + s), color = "red", linetype = "dashed") +
+  annotate("text", x = m, y = Inf, label = paste("Mean =", round(m, 1)), 
+           vjust = 2, hjust = -0.1, color = "red") +
+  annotate("text", x = m, y = Inf, label = paste("SD =", round(s, 1)), 
+           vjust = 4, hjust = -0.1, color = "red") +
+            xlab("95th percentile observations - predicted")
+
+m <- mean(compare.points$obs_bio_duration)
+s <- sd(compare.points$obs_bio_duration)
+p4 <- ggplot(compare.points,aes(x=obs_bio_duration)) + 
+  geom_histogram(bins = 10, fill = "steelblue", color = "white") +
+  geom_vline(xintercept = m, color = "red", linewidth = 1) +
+  geom_vline(xintercept = c(m - s, m + s), color = "red", linetype = "dashed") +
+  annotate("text", x = m, y = Inf, label = paste("Mean =", round(m, 1)), 
+           vjust = 2, hjust = -0.1, color = "red") +
+  annotate("text", x = m, y = Inf, label = paste("SD =", round(s, 1)), 
+           vjust = 4, hjust = -0.1, color = "red") +
+            xlab("Differences between observed and predicted flight period duration")
+
+marrangeGrob(list(p1,p2,p3,p4),ncol=2,nrow=2)
+```
+
+```{r}
+
+logistic_overlap <- function(l1,l2) {
+#  l1 <- l1[[1]]
+#  l2 <- l2[[1]]
+  if (!is.null(l1) & !is.null(l2)) {
+    mu1 <- l1[l1$term == "xmid",]$estimate
+    s1 <- l1[l1$term == "scal",]$estimate
+    mu2 <- l2[l2$term == "xmid",]$estimate
+    s2 <- l2[l2$term == "scal",]$estimate
+    res <- integrate(function(x) {
+      pmin(dlogis(x, mu1, s1), dlogis(x, mu2, s2))
+    }, lower = 166, upper = 243)$value
+  } else {
+    return(NA)
+  }
+}
+
+compare.dist <- inner_join(logistic_fits,logistic_biosim) %>%
+  rowwise() %>%
+  mutate(coverage=logistic_overlap(obs_params,bio_params)) %>%
+  dplyr::filter(!is.na(coverage)) %>%
+  left_join(compare.points)
+
+compare.worst <- compare.dist %>% dplyr::filter(coverage < 0.5) %>% mutate(year = fct_relevel(year,as.character(1972:1980)))
+ggplot(compare.dist,aes(y=coverage)) + geom_boxplot(aes(color=year))
+
+ggplot(compare.dist,aes(x=coverage,y=obs_5p)) + geom_point(aes(color=year))
+```
+# GAM analysis
+
+```{r}
+#| eval: false
+result <- data.frame(result)
+res <- data.frame(id=result$id)
+res$temp <- as.matrix(result[,grepl("temp",names(result))])
+res$lag <- as.matrix(result[,grepl("lag",names(result))])
+
+compare.gam <- left_join(compare.dist,res)
+
+test <- gam(obs_midpoint~te(temp,lag,k=15),data=compare.gam,method="REML",control=list(keepData=TRUE),family=gaussian())
+summary(test)
+
+### Plot 1
+# first construct a grid of prediction locations in lag and temperature
+plot_grid <- expand.grid(temp = seq(min(compare.gam$temp, na.rm=TRUE),
+                                    max(compare.gam$temp, na.rm=TRUE),
+                                    length.out=200),
+                         lag  = 0:max(compare.gam$lag))
+
+# find the per-lag max/min values
+data_locs <- data.frame(temp = as.numeric(compare.gam$temp),
+                        lag = as.numeric(compare.gam$lag)) %>%
+  group_by(lag) %>%
+  summarize(tmin = min(temp),
+            tmax = max(temp))
+
+# only want to plot in the range of observed temperatures
+# so throw-out those outwith the range
+plot_grid <- plot_grid %>%
+  left_join(data_locs) %>%
+  filter(temp >= tmin & temp<=tmax)
+
+pr <- predict(test, plot_grid, type="terms")
+plot_grid$p <- pr[,1]
+
+lag_breaks <- seq(0, 181, by=14)
+lag_labels <- format(ymd("1970-01-01") + lag_breaks, "%d %b")
+
+# finally make the plot
+p_dl_effect <- ggplot(plot_grid) +
+  geom_tile(aes(x=temp, y=lag, fill=p)) +
+  geom_contour(aes(x=temp, y=lag, z=p)) +
+  metR::geom_text_contour(aes(x=temp, y=lag, z=p),
+           rotate=FALSE, label.placer = metR::label_placer_flattest()) +
+  scale_fill_gradient2(low = scales::muted("blue"),
+                       high = scales::muted("red")) +
+  scale_y_continuous(breaks=lag_breaks, labels=lag_labels) +
+  labs(x="Temperature (C)", y="Lag date", fill="Distributed\nlag effect") +
+  theme_minimal() +
+  coord_cartesian(expand=FALSE)
+p_dl_effect
+
+### Plot 2
+# plot_grid <- expand.grid(temp = seq(min(compare.gam$temp, na.rm=TRUE),
+#                                     max(compare.gam$temp, na.rm=TRUE),
+#                                     length.out=200),
+#                          lag  = seq(0, max(compare.gam$lag)))
+
+plot_grid <- expand.grid(temp = seq(-10,15,length.out=200),
+                         lag  = seq(0, max(compare.gam$lag)))
+
+                         # build the Lp matrix, the design matrix for predictions
+                         lp <- predict(test, plot_grid, type="lpmatrix")
+
+                         # simulate from the posterior of the model
+                         bs <- rmvn(1000, coef(test), vcov(test))
+                         # zero the intercept
+                         bs[, 1] <- 0
+
+                         # calculate predictions
+                         pr <- lp%*%t(bs)
+
+                         plot_grid$lower <- NA
+                         plot_grid$upper <- NA
+                         plot_grid$p <- NA
+
+                         # for each temperature...
+                         for(t in unique(plot_grid$temp)){
+                           # calculate the per-temperature, per-simulation effect
+                             temps <- apply(pr[plot_grid$temp==t, ], 2, sum)
+
+                               # now get summary statistics over the posterior samples
+                                 qs <- quantile(temps, prob=c(0.025, 0.975))
+                                   plot_grid[plot_grid$temp==t,]$lower <- qs[1]
+                                     plot_grid[plot_grid$temp==t,]$upper <- qs[2]
+                                       plot_grid[plot_grid$temp==t,]$p <- median(temps)
+                                       }
+
+                                       # make data for the rug plot
+                                       temprug <- data.frame(temp=c(sa$temp))
+
+                                       # finally make the plot
+                                       p_temp_marginal <- ggplot(plot_grid) +
+                                         geom_ribbon(aes(x=temp, ymin=lower, ymax=upper), alpha=0.6) +
+                                           geom_line(aes(x=temp, y=p)) +
+                                             geom_rug(aes(x=temp), data=temprug) +
+                                               labs(x="Temperature (C)", y="Marginal effect") +
+                                                 theme_minimal()
+                                                 p_temp_marginal
+                                                 
+
+```
+
+
+{{< pagebreak >}}
+
+# Appendix 
+
+## Distribution of spruce budworm moths at light traps
+
+::: {.landscape}
+```{r}
+#| label: cap-distrib
+#| fig-cap: "Distribution of moth capture at each trap"
+#| fig-width: 10
+#| fig-height: 7
+
+# Plot flight dynamics
+Plot.obs <- function(i) {
+  Obs.dat <- Obs[Obs$id == i,]
+  tmp <- rep(Obs.dat$date,Obs.dat$sumday)
+  Obs.dat$median <- wtd.quantile(tmp,q=0.5)
+  Obs.dat$sumday.cumsum <- cumsum(Obs.dat$sumday)/sum(Obs.dat$sumday)
+  g <- ggplot(Obs.dat,aes(x=date)) + 
+    geom_col(aes(y=sumday),fill="steelblue") +
+    geom_point(aes(y=sumday.cumsum*max(sumday))) +
+    scale_y_continuous(
+      name = "Moths captured",
+      sec.axis = sec_axis(~ . / max(Obs.dat$sumday), name = "Cumulative proportion")
+    ) +
+    labs(
+      title =paste("Lat:",substr(Obs.dat$id,1,2),".",substr(Obs.dat$id,3,4),
+      sep=""," Long:-",substr(Obs.dat$id,5,6),".",
+                  substr(Obs.dat$id,7,8)," Year:19",substr(Obs.dat$id,9,10)),
+      x = "Date (DOY)"
+    ) +
+    theme(plot.title=element_text(size=7))
+
+# Get predictions from observed logistic
+  if (i %in% logistic_fits$id) {
+    obs.m <- logistic_fits[logistic_fits$id == i,"obs_fit"]$obs_fit[[1]]
+    if (!is.null(obs.m)) {
+      pred_dates <- seq(166, 243)
+      pred_values <- predict(obs.m, newdata = data.frame(date = pred_dates))*max(Obs.dat$sumday)
+      pred_df <- data.frame(date = pred_dates, pred = pred_values)
+      g <- g + geom_line(data = pred_df, aes(x = date, y = pred), color = "darkblue", linewidth = 1)
+   }
+  }
+ 
+# Get predictions from Biosim logistic
+  if (i %in% logistic_biosim$id) {
+    bio.m <- logistic_biosim[logistic_biosim$id == i,"bio_fit"]$bio_fit[[1]]
+    if (!is.null(bio.m)) {
+     pred_dates <- seq(166, 243)
+      pred_values <- predict(bio.m, newdata = data.frame(date = pred_dates))*max(Obs.dat$sumday)
+      pred_df <- data.frame(date = pred_dates, pred = pred_values)
+      g <- g + geom_line(data = pred_df, aes(x = date, y = pred), color = "red", linewidth = 1)
+    }
+  }
+ 
+  return(g)
+}
+
+ids <- unique(Obs$id)
+maxpage <- floor(length(ids)/9)
+for (l in 1:maxpage) {
+  for (k in 1:9) {
+    i <- (l-1)*9 + k
+    g <- Plot.obs(ids[i])    
+    assign(paste("p",k,sep=""),g)
+  }
+  grid.arrange(p1,p2,p3,p4,p5,p6,p7,p8,p9,nrow=3)
+}
+
+```
+:::

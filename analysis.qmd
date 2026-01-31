@@ -1,0 +1,498 @@
+---
+title: Distributed lag models for aphid arrivals
+author: David L Miller
+execute:
+  cache: true
+format:
+   html:
+     embed-resources: true
+
+---
+
+# Introduction
+
+[Rothamsted Insect Survey (RIS)](https://insectsurvey.com/aphid-bulletin) and [Science and Advice for Scottish Agriculture (SASA)](https://www.sasa.gov.uk/wildlife-environment/aphid-monitoring) run a network of suction traps across the UK. These traps capture insects flying at a height of 12.2m, including aphids during their "first flight". Daily catches are analysed by a skilled team of taxonomists to identify species of each individual.
+
+For this analysis, we characterize "arrival" as the capture of the 10th aphid at a given suction trap. We use data from 3 suction traps in Edinburgh, Dundee and Newcastle from 1971-2017 and select the English grain aphid, [*Sitobion avenae*](https://influentialpoints.com/Gallery/Sitobion_avenae_English_Grain_aphid.htm), as our target species for modelling.
+
+Following models from Rothamsted Research, we model the response as a normal distribution and use only temperature to predict arrival. The Rothamsted model uses the average January-February temperature, whereas our distributed lag model includes daily temperatures from 1 January through 28 February for each year.
+
+The arrival data were processed by [BioSS](https://www.bioss.ac.uk) and are available at the following DOI (hosted by Rothamsted Research) [https://doi.org/10.23637/zwmqcdv4](https://doi.org/10.23637/zwmqcdv4).
+
+The source for this document can be found at [`https://gitlab.bioss.ac.uk/dmiller/savenae-eastcoast-distlag`](https://gitlab.bioss.ac.uk/dmiller/savenae-eastcoast-distlag).
+
+# Preamble: data processing
+
+We first load useful packages:
+
+```{r preamble, message=FALSE}
+# modelling
+library(mgcv)
+
+# data manipulation
+library(lubridate)
+library(tidyverse)
+
+# plotting
+library(ggplot2)
+library(scales)
+library(patchwork)
+```
+
+Then load the data we've downloaded from Rothamsted Research.
+
+```{r aphid_dat}
+sa <- read.csv("data/savenae_northeast_1971_2017.csv")
+```
+
+We now need to get temperature data. This has been prepared from the "`tas_1km_daily`" product available from [UKCEH](https://catalogue.ceh.ac.uk/documents/2ab15bf0-ad08-415c-ba64-831168be7293#section-citations).
+
+```{r temperature-data}
+# load flat data
+tt_flat <- read.csv("data/temps.csv")
+# create matrix-columns in the data
+tt <- tt_flat[,c("Site", "Year")]
+tt$temp <- as.matrix(tt_flat[, grepl("temp", names(tt_flat))])
+tt$lag <- as.matrix(tt_flat[, grepl("lag", names(tt_flat))])
+# add that data into the main data.frame
+sa <- merge(sa, tt, by=c("Year", "Site"))
+```
+
+
+
+# Exploratory analysis
+
+Since we are not constructing site-specific temperature terms, we first check to see if the time series are similar between the sites to ensure that grouping them this way is reasonable.
+
+```{r site-time-series, fig.width=15, fig.height=10}
+# again "tidy" the data into a data.frame suitable for ggplot2
+tplot <- data.frame(sa$temp)
+colnames(tplot) <- paste0(sa$lag[1,])
+tplot$Year <- sa$Year
+tplot$Site <- sa$Site
+
+# for plotting we want decade by year-in-decade grid, so create
+# the relevant variables
+tplot$decade <- cut(tplot$Year, seq(1970, 2020, by=10), lower=TRUE, right=FALSE,
+                    labels=paste0(seq(1970, 2010, by=10), "s"))
+tplot$y_in_decade <- ordered(sub("^\\d{3}", "", tplot$Year))
+
+tplot <- tplot %>%
+  pivot_longer(-c(Year, Site, decade, y_in_decade),
+               names_to="lag", values_to="temperature") %>%
+  group_by(Year, Site) %>%
+  mutate(JanFeb=mean(temperature)) %>%
+  ungroup() %>%
+  mutate(lag = as.numeric(lag)) %>%
+  mutate(ycoord = lag) %>%
+  group_by(Year, Site) %>%
+  arrange(lag)
+
+# store that JanFeb temperature in sa
+jf_temps <- unique(tplot[,c("Site", "Year", "JanFeb")])
+sa$JanFeb <- jf_temps$JanFeb
+
+# make nice labels for the lag axis
+lag_breaks <- c(0,31)
+lag_labels <- format(ymd("1970-01-01") + lag_breaks, "%d %b")
+
+# finally, construct the plot
+ggplot(tplot) +
+  geom_line(aes(x=ycoord, y=temperature, group=Site, colour=Site)) +
+  geom_hline(aes(yintercept=JanFeb, colour=Site), lty=2) +
+  scale_fill_viridis_c() +
+  facet_grid(decade~y_in_decade) +
+  labs(x="Time", y="Temperature (C)") +
+  scale_x_continuous(breaks=lag_breaks, labels=lag_labels) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+We can see here that the sites are generally in agreement (at least in their broad patterns). Overlaid on the plot are dashed lines indicating the average January/February temperatures. Visible here are the (sometimes) large, temporary deviations from the average (rather than, say just an oscillation around the mean). In particular, 1982 has a very large "cold snap" but other years have smaller, but notable, deviations.
+
+Since we want to look at how temperatures affect the arrival time, we can make some crude plots of how these interact. Let's plot the cumulative temperatures in the first 59 days of the year (January 1st to February 28th) with the arrival dates. The plot also shows the average temperatures (point colours).
+
+
+```{r exploratory}
+# taking the temperature data and "tidying" it for plotting
+tplot <- data.frame(tt$temp)
+colnames(tplot) <- paste0(tt$lag[1,])
+tplot$Year <- tt$Year
+tplot$Site <- tt$Site
+
+tplot <- tplot %>%
+  pivot_longer(-c(Year, Site), names_to="lag", values_to="temperature") %>%
+  left_join(sa[, c("Year", "Site", "Arrive")], by=c("Year", "Site")) %>%
+  mutate(lag = as.numeric(lag)) %>%
+  mutate(ycoord = lag) %>%
+  group_by(Year, Site) %>%
+  arrange(lag) %>%
+  mutate(temperature = cumsum(temperature))
+
+# now constructing the plot
+ggplot(sa, aes(x=Year, y=Arrive)) +
+  geom_tile(aes(x=Year, y=ycoord, fill=temperature), data=tplot) +
+  geom_segment(aes(x=Year, yend=max(tplot$lag)+1, y=Arrive), alpha=0.3) +
+  geom_point(aes(colour=JanFeb)) +
+  facet_wrap(~Site) +
+  scale_fill_viridis_c() +
+  scale_colour_gradient(low=muted("red"), high="orange") +
+  labs(y="Day of year",
+       fill="Cumulative\ntemperature (C)",
+       colour="Jan-Feb average\ntemperature (C)") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+```{r allsites, echo=FALSE, warning=FALSE}
+as_arrivals <- ggplot(sa, aes(x=Year, y=Arrive)) +
+  geom_tile(aes(x=Year, y=ycoord, fill=temperature), data=tplot) +
+  geom_segment(aes(x=Year, yend=max(tplot$lag)+1, y=Arrive), alpha=0.3) +
+  geom_point(aes(colour=JanFeb)) +
+  facet_wrap(~Site) +
+  scale_fill_viridis_c() +
+  scale_colour_gradient(low=muted("red"), high="orange") +
+  scale_y_continuous(limits=c(0, 227), expand=c(0, 1)) +
+  scale_x_continuous(limits=c(1969, 2019), expand=c(0.01, 0.01)) +
+  labs(y="Day of year",
+       fill="Cumulative\ntemperature (C)",
+       colour="Jan-Feb average\ntemperature (C)") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+ggsave(as_arrivals, file="savenae_arrival_temps.pdf", width=10, height=9)
+```
+
+From the above we can see, in general, that the more blue the cumulative temperature plot, the later the aphid arrival. This pattern is generally followed by the average temperature (point colours more red leading to later arrival) but there is a little more subtlety to the former. It is this level of detail that the distributed lag model allows us to exploit.
+
+```{r paper-figure-1, echo=FALSE, warning=FALSE}
+p1 <- ggplot(subset(sa, Site=="Dundee"), aes(x=Year, y=Arrive)) +
+  geom_tile(aes(x=Year, y=ycoord, fill=temperature), data=tplot) +
+  geom_segment(aes(x=Year, yend=max(tplot$lag)+1, y=Arrive), alpha=0.3) +
+  geom_point(aes(colour=JanFeb)) +
+  annotate("text", y=28, x=2018.5, label="Winter temperatures", angle=90) +
+  annotate("text", y=150, x=2018.5, label="Aphid arrival", angle=90) +
+  scale_fill_viridis_c() +
+  scale_colour_gradient(low=muted("red"), high="orange") +
+  scale_y_continuous(limits=c(0, 227), expand=c(0, 1)) +
+  scale_x_continuous(limits=c(1969, 2019), expand=c(0.01, 0.01)) +
+  labs(y="Day of year",
+       fill="Cumulative\ntemperature (C)",
+       colour="Jan-Feb average\ntemperature (C)") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+ggsave(p1, file="savenae_arrival_temps_dundee.pdf", width=6, height=9)
+```
+
+# Models
+
+We now fit three models to the arrival data. The first is based on the "standard" approach of using January-February average temperatures. We then go on to develop a model that uses 8 "weekly" temperatures in January and February to attempt to increase the predictive power of our simple linear model. We finally showcase the distributed lag model, which allows us to include full information about the temperature time series each year.
+
+Note that in each case, we did experiment with including a factor variable for each site, but these terms were not significant and this did not improve the $R^2$ of any model.
+
+We include basic model diagnostics and summary information for each of the three models, though note the first two are here for mainly for explanatory purposes.
+
+## Modelling with average January-February temperature
+
+For comparison with the distributed lag model, we first fit something similar to the Rothamsted model: using January-February average temperature as a predictor.
+
+```{r model-static, fig.height=4, fig.width=7}
+b_jf <- lm(Arrive ~ JanFeb, data=sa)
+
+summary(b_jf)
+par(mfrow=c(1, 2))
+plot(b_jf, which=1:2)
+par(mfrow=c(1, 1))
+```
+
+A simple analysis of the above results shows although this model has some predictive power, it is far from impressive in terms of $R^2$.
+
+## Gaining resolution: 8 weekly temperatures
+
+It feels like we are discarding some useful information in the form of the daily temperatures. What if we create 8 weekly mean temperatures and use them for the model?
+
+```{r weekly, fig.height=4, fig.width=7}
+# create the (roughly) weekly variables
+avtemps <- tt %>%
+  group_by(Site, Year) %>%
+  mutate(week1 = mean(temp[,1:7]),
+         week2 = mean(temp[,8:15]),
+         week3 = mean(temp[,16:22]),
+         week4 = mean(temp[,23:29]),
+         week5 = mean(temp[,30:36]),
+         week6 = mean(temp[,37:43]),
+         week7 = mean(temp[,44:51]),
+         week8 = mean(temp[,52:59])) %>%
+  select(-lag, -temp) %>%
+  ungroup()
+# merge those onto the data
+saw <- merge(sa, avtemps)
+
+# finally fit our model
+b_8wk <- lm(Arrive ~ week1+week2+week3+week4+week5+week6+week7+week8,
+            data=saw)
+
+summary(b_8wk)
+
+par(mfrow=c(1, 2))
+plot(b_8wk, which=1:2)
+par(mfrow=c(1, 1))
+```
+
+Although we get some gain in $R^2$ when we use weekly summaries, we must recognise that these are arbitrary summaries and that changing the "width" and number of summaries we use doesn't gain us much biological understanding about how aphid emergence works in terms of temperature.
+
+
+## Distributed lag modelling
+
+We now move to the distributed lag model, which allows us to use the daily temperatures as provided by meteorological services, which seem more biologically relevant than arbitrary summaries of the temperature data.
+
+The distributed lag model allows us to couple the daily temperatures with a lag term to ensure that we deal with any correlation between the lagged variables, while at the same time modelling the full time series and ensuring that transitions between the lags are smooth.
+
+
+We set this up with the `temp` and `lag` matrix-columns that we created above.
+
+```{r model-dl, fig.height=7, fig.width=7}
+b_dl <- gam(Arrive~te(temp, lag, k=15),
+            data=sa, method="REML",
+            control=list(keepData=TRUE),
+            family=gaussian())
+
+summary(b_dl)
+gam.check(b_dl)
+```
+
+Note that we use `control=list(keepData=TRUE)` which includes a `$data` element to the returned model, which is useful plotting later.
+
+This model is by no means perfect (the residuals are a little thick in the tails (see Q-Q plot and histogram) but our main interest here is understanding the distributed lag term, so we leave it at that.
+
+# Model checking
+
+We can check to look for systematic issues across space and time by looking at the residuals. For space we use the sites (we only have 3) and for time we use decades (per year would only have a maximum of three residuals per boxplot).
+
+```{r boxplots}
+# create a decade variable
+decf <- function(model){
+  cut(sa$Year,
+      seq(1970, 2020, by=10), lower=TRUE, right=FALSE,
+      labels=paste0(seq(1970, 2010, by=10), "s"))
+}
+
+# get the data (excluding missing values that were dropped during modelling)
+rdat <- data.frame(Site = c(sa$Site,
+                            sa$Site,
+                            sa$Site),
+                   Model = ordered(c(rep("JanFeb", nrow(sa)),
+                                   rep("8 week", nrow(sa)),
+                                   rep("Distributed\nlag", nrow(sa))),
+                                   labels=c("JanFeb", "8 week",
+                                            "Distributed\nlag")),
+                   resids = c(residuals(b_jf),
+                              residuals(b_8wk),
+                              residuals(b_dl)),
+                   decade = c(decf(b_jf),
+                              decf(b_8wk),
+                              decf(b_dl)))
+
+# residual check for site
+ggplot(rdat) +
+  geom_boxplot(aes(x=Site, y=resids)) +
+  geom_hline(yintercept=0, lty=2) +
+  facet_wrap(~Model) +
+  labs(y="Deviance residuals") +
+  theme_minimal()
+
+# residual check for decade
+ggplot(rdat) +
+  geom_boxplot(aes(x=decade, y=resids)) +
+  geom_hline(yintercept=0, lty=2) +
+  facet_wrap(~Model) +
+  labs(y="Deviance residuals", x="Decade") +
+  theme_minimal()
+```
+
+The residuals look okay between site, perhaps there is some difference between the 1970s and the other decades.
+
+# Making plots for distributed lag models
+
+The default plotting for distributed lag terms (via `mgcv::plot.gam`) is not terribly clear, so we build our own plots here. Note that a similar plot is available via the [`gratia`](https://gavinsimpson.github.io/gratia/) package.
+
+Note that if we want to see the whole distributed lag surface we don't use matrix predictors. If we did that we would only see the total effect per temperature, rather than the full lag-by-temperature surface.
+
+```{r plot-dl-effect-pred-data}
+# first construct a grid of prediction locations in lag and temperature
+plot_grid <- expand.grid(temp = seq(min(sa$temp, na.rm=TRUE),
+                                    max(sa$temp, na.rm=TRUE),
+                                    length.out=200),
+                         lag  = 0:max(sa$lag))
+
+# find the per-lag max/min values
+data_locs <- data.frame(temp = as.numeric(sa$temp),
+                        lag = as.numeric(sa$lag)) %>%
+  group_by(lag) %>%
+  summarize(tmin = min(temp),
+            tmax = max(temp))
+
+# only want to plot in the range of observed temperatures
+# so throw-out those outwith the range
+plot_grid <- plot_grid %>%
+  left_join(data_locs) %>%
+  filter(temp >= tmin & temp<=tmax)
+```
+
+Now we have a prediction `data.frame`, we can make the predictions. Note we use the `"terms"` prediction type to get the per-term predictions (this doesn't matter in this case where we only have one term in the model, but is useful in general).
+
+```{r plot-dl-effect-pred}
+# make predictions per term
+pr <- predict(b_dl, plot_grid, type="terms")
+
+# we just want the first column s(lag, temp)
+plot_grid$p <- pr[,1]
+```
+
+Once the predictions are made, we can construct the plot.
+
+```{r plot-dl-effect-plot}
+# make nice labels for the lag axis
+lag_breaks <- seq(0, 56, by=14)
+lag_labels <- format(ymd("1970-01-01") + lag_breaks, "%d %b")
+
+# finally make the plot
+p_dl_effect <- ggplot(plot_grid) +
+  geom_tile(aes(x=temp, y=lag, fill=p)) +
+  geom_contour(aes(x=temp, y=lag, z=p)) +
+  metR::geom_text_contour(aes(x=temp, y=lag, z=p),
+           rotate=FALSE, label.placer = metR::label_placer_flattest()) +
+  scale_fill_gradient2(low = scales::muted("blue"),
+                       high = scales::muted("red")) +
+  scale_y_continuous(breaks=lag_breaks, labels=lag_labels) +
+  labs(x="Temperature (C)", y="Lag date", fill="Distributed\nlag effect") +
+  theme_minimal() +
+  coord_cartesian(expand=FALSE)
+p_dl_effect
+```
+
+We can also look at the cumulative effect plots, which are essentially the cumulative sums of the columns in the previous figure (with the gaps filled-in). These plots can help us see what is going on in particular years and how different they might be to each other. The below plot shows these faceted by decade. Although this grouping is basically arbitrary, we do see that the 1980s appear much more volatile than the other decades.
+
+```{r plot-cumul, fig.width=10, fig.height=10}
+# create variables for grouping and faceting the plot
+b_dl$data$decade <- cut(sa$Year, seq(1970, 2020, by=10), lower=TRUE, right=FALSE,
+                        labels=paste0(seq(1970, 2010, by=10), "s"))
+b_dl$data$y_in_decade <- ordered(sub("^\\d{3}", "", b_dl$data$Year))
+
+
+# helpful plotting function
+source("plot_dlnm_cumulative.R")
+
+# build the plot and change some of the aesthetics
+p_cumul <- plot_dlnm_cumulative(b_dl, facet_by="decade",
+                                group_by="y_in_decade",
+                                group_labs=TRUE) +
+  scale_colour_viridis_d() +
+  labs(colour="Year in decade")
+p_cumul
+```
+
+Note the spread in the final values in the 1970s and recall that the 1970s also had the larger (and more positive) residuals than the other decades.
+
+Let's investigate some years where we have large deviations in our previous plot. It looks like 1978/1979 and 1970 are very different to the other years in the decade. The winter of 1978/1979 in the UK was known as the ["winter of discontent"](https://en.wikipedia.org/wiki/Winter_of_Discontent) because of various sociopolitical issues exacerbated by severe storms and the coldest winter in 16 years.
+
+We can see from the below plot (which is just a subset of the plot above with all years) that these were colder years (on average, see horizontal dashed lines), meaning that it took longer (more positive values in the cumulative plot), so emergence is delayed. 1989 is much more negative than the other years -- looking at the corresponding temperature plot we see that the average temperature was higher than the other and that the temperature really fluctuated only a little around that (contrast to other years in the 1980s); this was the warmest winter on record at the time. 1982 is particularly interesting as we see a huge dip in temperatures (down to -10C) towards the end of the lag period (end of February), before recovering: we see a similar picture in the cumulative plot, the effect increasing and delaying emergence (with some eventual flattening from the temperatures returning to around the same value as other years).
+
+```{r investigate}
+inv <- sa %>%
+ filter(Year %in% c(1970, 1978, 1979, 1982, 1989))
+
+tplot <- data.frame(inv$temp)
+colnames(tplot) <- paste0(inv$lag[1,])
+tplot$Year <- inv$Year
+tplot$Site <- inv$Site
+tplot$decade <- cut(tplot$Year,
+                    seq(1970, 2020, by=10), lower=TRUE, right=FALSE,
+                    labels=paste0(seq(1970, 2010, by=10), "s"))
+tplot$y_in_decade <- ordered(sub("^\\d{3}", "", tplot$Year))
+
+tplot <- tplot %>%
+  pivot_longer(-c(Year, Site, decade, y_in_decade),
+               names_to="lag", values_to="temperature") %>%
+  left_join(sa[, c("Year", "Site", "JanFeb")]) %>%
+  mutate(lag = as.numeric(lag)) %>%
+  mutate(ycoord = lag) %>%
+  group_by(Year, Site) %>%
+  arrange(lag)
+
+ggplot(tplot) +
+  geom_line(aes(x=ycoord, y=temperature, group=Site, colour=Site)) +
+  geom_hline(aes(yintercept=JanFeb, colour=Site), lty=2) +
+  scale_fill_viridis_c() +
+  facet_wrap(~Year) +
+  theme_minimal() +
+  labs(x="Lag", y="Temperature (C)") +
+  theme(legend.position = "bottom")
+```
+
+
+We might also want to look at the average temperature effect, over all sites, years and lags. We can also sample from the posterior of the model in order to get uncertainty around the term.
+
+```{r, temperature-marginal}
+# once again construct a grid of prediction locations in lag and temperature
+plot_grid <- expand.grid(temp = seq(min(sa$temp, na.rm=TRUE),
+                                    max(sa$temp, na.rm=TRUE),
+                                    length.out=200),
+                         lag  = seq(0, max(sa$lag)))
+
+# build the Lp matrix, the design matrix for predictions
+lp <- predict(b_dl, plot_grid, type="lpmatrix")
+
+# simulate from the posterior of the model
+bs <- rmvn(1000, coef(b_dl), vcov(b_dl))
+# zero the intercept
+bs[, 1] <- 0
+
+# calculate predictions
+pr <- lp%*%t(bs)
+
+plot_grid$lower <- NA
+plot_grid$upper <- NA
+plot_grid$p <- NA
+
+# for each temperature...
+for(t in unique(plot_grid$temp)){
+  # calculate the per-temperature, per-simulation effect
+  temps <- apply(pr[plot_grid$temp==t, ], 2, sum)
+
+  # now get summary statistics over the posterior samples
+  qs <- quantile(temps, prob=c(0.025, 0.975))
+  plot_grid[plot_grid$temp==t,]$lower <- qs[1]
+  plot_grid[plot_grid$temp==t,]$upper <- qs[2]
+  plot_grid[plot_grid$temp==t,]$p <- median(temps)
+}
+
+# make data for the rug plot
+temprug <- data.frame(temp=c(sa$temp))
+
+# finally make the plot
+p_temp_marginal <- ggplot(plot_grid) +
+  geom_ribbon(aes(x=temp, ymin=lower, ymax=upper), alpha=0.6) +
+  geom_line(aes(x=temp, y=p)) +
+  geom_rug(aes(x=temp), data=temprug) +
+  labs(x="Temperature (C)", y="Marginal effect") +
+  theme_minimal()
+p_temp_marginal
+```
+
+In effect this plot shows the sums over the columns of the 2-d plot of the temperature-lag effect. We can see that the effect at very cold temperatures is potentially very large, though as we can see from the rug plot we don't observe these temperatures very often.
+
+Note that the plot shows the effect size for the distributed lag term. We don't show the mean (`r round(coef(b_dl)[1],1)`) here.
+
+
+```{r model-effects-paper-plot, echo=FALSE, warning=FALSE}
+library(patchwork)
+p_effects <- ((p_dl_effect/p_temp_marginal) | p_cumul) +
+  plot_layout(guides = 'collect',
+              widths=c(0.65, 1)) & theme(legend.position='bottom')
+ggsave(p_effects, file="savenae_effects.pdf", width=10, height=8)
+```
+
+
+# Conclusions
+
+We have shown how to include a distributed lag term into a GAM modelling aphid arrival. The distributed lag term allows us to include a full time series of relevant temperatures to the model and view those effects as they change over time and temperature or aggregated at the time or temperature scale. This avoids issues with deciding how to make (arbitrary) summaries of meteorological time series data. As well as allowing for more flexible modelling that include more data, we also have the advantage of being able to see new insights via the resulting summary plots.
