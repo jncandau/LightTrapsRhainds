@@ -1,5 +1,5 @@
 // Hierarchical convolution model for spruce budworm moth trapping data
-//
+// 
 // Goal: infer the TIMING and DURATION of adult moth emergence, not abundance.
 //
 // Model structure:
@@ -14,7 +14,7 @@
 //   Population
 //     └── Site (log_shape_s, log_rate_s): partial pooling over Locations
 //           └── Site-year: inherits site kernel; only timing varies via
-//                          the temperature gate (tmax differs by year)
+//                          the temperature gate (tavg differs by year)
 //
 // Parameters NOT in this model:
 //   - log_scale  (abundance; irrelevant when modelling shape only)
@@ -31,7 +31,7 @@ data {
 
   matrix[N, T] pup_pmf;                     // normalised pupal PMF [N x T]
   array[N, T] int<lower=0> y;               // observed moth counts [N x T]
-  matrix[N, T] tmax;                        // daily max temperature [N x T], degrees C
+  matrix[N, T] tavg;                        // daily max temperature [N x T], degrees C
 }
 
 transformed data {
@@ -74,11 +74,11 @@ transformed parameters {
   //
   // For each site-year i and day t:
   //   conv[t]       = sum_{k=1}^{K} pup_pmf[i, t-k] * kernel[s, k]
-  //   gated[t]      = conv[t] * sigmoid(T_steep * (tmax[i,t] - T_thresh))
+  //   gated[t]      = conv[t] * sigmoid(T_steep * (tavg[i,t] - T_thresh))
   //   pred_pmf[i,t] = gated[t] / sum(gated)
   //
   // Site-years at the same location share the same kernel; they differ only
-  // through their year-specific tmax values, which shift the temperature gate.
+  // through their year-specific tavg values, which shift the temperature gate.
   //
   matrix[N, T] pred_pmf;
   for (i in 1:N) {
@@ -98,7 +98,7 @@ transformed parameters {
         int src = t - k;
         if (src >= 1) cv += pup_pmf[i, src] * kernel[k];
       }
-      real gate = inv_logit(T_steep * (tmax[i, t] - T_thresh));
+      real gate = inv_logit(T_steep * (tavg[i, t] - T_thresh));
       gated[t]  = cv * gate;
     }
 
@@ -153,19 +153,18 @@ generated quantities {
 
   // ── Peak emergence DOY ────────────────────────────────────────────────────────
   // Day of year with the highest predicted emergence probability
-  array[N] int peak_doy;
+  vector[N] int peak_doy;
   for (i in 1:N) {
-    real best_p = -1;
-    int  best_t = 1;
+    real norm = 0;
+    real weighted_t = 0;
+      
+    // Compute mean DOY as weighted average of pred_pmf
     for (t in 1:T) {
-      if (pred_pmf[i, t] > best_p) {
-        best_p = pred_pmf[i, t];
-        best_t = t;
-      }
+      weighted_t += t * pred_pmf[i, t];
+      norm       += pred_pmf[i, t];
     }
-    peak_doy[i] = best_t;
+    peak_doy[i] = weighted_t / norm;  // change to real if currently int
   }
-
   // ── Duration: shortest interval containing 80% of emergence mass ─────────────
   // Computed as the number of days needed when accumulating from the highest
   // probability day downward (highest density interval approximation)

@@ -76,19 +76,19 @@ obs_mat <- Maine.clean |>
 
 # Daily maximum temperature per site-year, used to gate flight activity:
 # moths do not fly on days below an estimated threshold temperature
-tmax_mat <- Maine.clean |>
+tavg_mat <- Maine.clean |>
   rowwise() |>
   summarise(
-    tmax = list({
+    tavg = list({
       tb <- Weather |>
         mutate(DOY = as.integer(format(Date, "%j"))) |>
         group_by(DOY) |>
-        summarise(tmax = mean(tmax, na.rm = TRUE), .groups = "drop")
-      expand_to_365(tb, tmax)
+        summarise(tavg = mean(tavg, na.rm = TRUE), .groups = "drop")
+      expand_to_365(tb, tavg)
     }),
     .groups = "drop"
   ) |>
-  pull(tmax) |>
+  pull(tavg) |>
   (\(lst) {
     m <- matrix(0, nrow = N, ncol = T)
     for (i in seq_along(lst)) m[i, ] <- lst[[i]]
@@ -105,7 +105,7 @@ stan_data <- list(
   site_id = site_id,
   pup_pmf = pup_pmf,
   y       = obs_mat,
-  tmax    = tmax_mat
+  tavg    = tavg_mat
 )
 
 # ── 7. Compile and sample ─────────────────────────────────────────────────────
@@ -115,10 +115,10 @@ mod <- cmdstan_model("moths_hierarchical.stan")
 fit <- mod$sample(
   data            = stan_data,
   seed            = 1965,
-  chains          = 2,
-  parallel_chains = 2,
-  iter_warmup     = 40,
-  iter_sampling   = 40,
+  chains          = 4,
+  parallel_chains = 4,
+  iter_warmup     = 1000,
+  iter_sampling   = 1000,
   adapt_delta     = 0.95,
   max_treedepth   = 12,
   refresh         = 200,
@@ -126,6 +126,8 @@ fit <- mod$sample(
 )
 
 fit$save_object("fit_moths.rds")
+
+fit <- read_rds("fit_moths.rds")
 
 # ── 8. Diagnostics ────────────────────────────────────────────────────────────
 
@@ -181,7 +183,7 @@ print(results)
 
 # ── 10. Diagnostic plots ──────────────────────────────────────────────────────
 
-# Temperature threshold sigmoid
+# Temperature threshold sigmoid curve
 tibble(temp = seq(-5, 30, 0.1)) |>
   mutate(
     flight_prob = plogis(mean(draws$T_steep) * (temp - mean(draws$T_thresh)))
@@ -200,3 +202,4 @@ results |>
   geom_errorbar(aes(ymin = peak_q05, ymax = peak_q95), width = 0, alpha = 0.4) +
   labs(x = "Year", y = "Posterior mean peak DOY",
        title = "Emergence peak timing by site and year")
+

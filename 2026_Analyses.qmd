@@ -48,57 +48,195 @@ date_to_doy.f <- function(year,month,day) {
 #| echo: false
 
 ###########################################
-### Read flight data from Marc's files
+### Read flight data 
 ###########################################
-# Identify record source based on ID last digit
-#   0: Original files 1-7 from Marc
-#   1: Maritimes light trap catches
-#   2: Last batch of files recovered by Marc
+# Here we recovered light trap data from Maine Forest Service
 # Records were selected based on a set of criteria
 # Criteria #1: at least 30 moths captured in total
-# Criteria #2: at least one survey record of absence before emergence
-# According to Marc: Among the site*year that Criteria #2 would eliminate, several are very close to 0
-# or have 0 but it wasn't entered. Based on his information, Marc made the following list of site*year
-# to eliminate
-# Marc.Eliminate <- c("4599667572","4668604372","4544634673","4614659173","4614659175","4487673677",
-#               "4665683977","4708689378","4742673478","4589699779")
-# Criteria #3: more than 10 survey dates
-# Criteria #4: No more than 30% of the total sample size was trapped in one single day 
-# After Discussion with Marc in March 2017, it was decided to increase the limit of max sumday to 50% of
-# population caught but the duration of the flight has to be > 6 days to limit the risk of having
-# migration flights 
+# Criteria #2: more than 10 survey dates
 
-Obs <- read.csv2("Observations.csv")
-# Relocate a trap that appears in the ocean
-Obs <- Obs %>%
-  mutate(lat = if_else(lat == 46.38, 46.40, lat),
-  year <- as.factor(year))
+Maine_data <- readxl::read_excel("LightTrapsMaine1961_1988_JNC.xlsx",sheet="Data")
+Maine_coord <- readxl::read_excel("LightTrapsMaine1961_1988_JNC.xlsx",sheet="Coordinates")
 
-# Remove traps for which there are too many values at exactly 100
-Trap.too.many.100 <- c("4594666473","4521673080","4561649880","4588674680","4594666480","4636635080","4689674080","4708656980")
+# # Format the dataset and add 1 to DOY on leap years
+Maine.dat <- Maine_data %>%
+  distinct() %>%
+  dplyr::select(-Total) %>%
+  pivot_longer(cols=`166`:`226`,names_to = "DOY",values_to = "Moths") %>% 
+  mutate(DOY=ifelse(leap_year(Year),as.integer(DOY)+1,as.integer(DOY))) %>% 
+  left_join(Maine_coord) %>% 
+  mutate(id=paste0(as.integer(Latitude*100),as.integer(Longitude*-100),Year-1900)) %>% 
+  dplyr::filter(!is.na(Moths)) %>% dplyr::filter(Moths>0)
 
-# Remove traps with fitted duration less than 7 or more than 21 days
-Trap.bad.duration <- c("4543677472","4588674676","4613687275","4487673673","4594666478","4689674078","4497701680","4588674674","4441685974","4697688775","4594666474","4708656978","4547635879","4543677478","4613687278","4666687375","4497701674","4636635076","4589699778","4638640473","4543677475","4708656972","4517704772","4708656973","4536694380","4387700280","4661695279","4640634075","4561649872","4441652277","4487673676","4636635079","4708656974","4661695276","4583620277","4797664679","4697688773","4487673672","4547635876","4487673675","4530685272","4561649878","4547695976")
+Maine.tb <- Maine.dat %>% group_by(id) %>% nest(Moths=c(DOY,Moths))
 
-Obs <- Obs %>% dplyr::filter(! id %in% c(Trap.too.many.100,Trap.bad.duration))
+rm(Maine_data,Maine_coord)
 ```
 
-```{r}
-
-n_per_year <- Obs %>% dplyr::select(year,id) %>% distinct() %>% group_by(year) %>% summarize(n=length(id))
-
-```
-We retrieved light trap data collected between 1972 and 1980 in Atlantic Canada from the archive room at the Atlantic Forestry Centre in Fredericton. Most of the data originated from two sources: (1) a broad scale survey of SBW using light traps in Atlantic Canada (Hurley and Titus 1987); (2) annual reports of the Maine State Department of Forest, in particular a multiyear summary including detailed maps and tables (Weed 1977). We approximated the geographic location of experimental sites to the nearest 0.01 latitudinal and longitudinal degrees (@maptraps). The light source used to attract SBW generally consisted of a Coleman lantern powered by naphtha gas and operated from sunset until dawn. The light source was placed at the center of two crossing vanes that deflected the moths down toward a funnel into the trap; a strip of insecticide at the bottom of the trap killed captured insects (Fig. 1 in Hurley and Titus 1987). Rothamsted light traps (Williams 1939) were also used at some locations in Maine. Light traps at most sites were deployed within forest stands 3 to 6 m above ground. All sites included SBW host trees as dominant or co-dominant species; due to the age of the data, the composition of the forest stands cannot be precisely determined.
+We retrieved light trap data collected between 1961 and 1988 in Maine from annual reports of the Maine State Department of Forest, in particular a multiyear summary including detailed maps and tables (Weed 1977). We approximated the geographic location of experimental sites to the nearest 0.01 latitudinal and longitudinal degrees (@fig-maptraps). The light source used to attract SBW generally consisted of a Coleman lantern powered by naphtha gas and operated from sunset until dawn. The light source was placed at the center of two crossing vanes that deflected the moths down toward a funnel into the trap; a strip of insecticide at the bottom of the trap killed captured insects (Fig. 1 in Hurley and Titus 1987). Rothamsted light traps (Williams 1939) were also used at some locations in Maine. Light traps at most sites were deployed within forest stands 3 to 6 m above ground. All sites included SBW host trees as dominant or co-dominant species; due to the age of the data, the composition of the forest stands cannot be precisely determined.
 
 At each location, the light traps were inspected daily to collect the moths which were then placed in a paper bag labelled by date-site and transferred in a freezer within 24 hours; for \< 0.5% of individual observations, traps were revised every second or third day. The moths were sorted for each collection bag to separate SBW from other species (‘by-catch’) and determine the number of SBW adults; due to time constraints, the gender of SBW was not determined. The number of SBW adults for most collections was determined by counting the number of individuals. In instances of extreme SBW abundance (\> 1000 individuals), the number of adults was assessed either by counting and weighing a subsample of adults, or by approximating the number of adults by groups of 100 individuals.
 
+We retrieved spruce budworm defoliation data from: https://www.uvm.edu/femc/CI4/data/archive/project/northeastern_ads/dataset/historical-maine-forest-service-aerial-detection
+
+
+# Annual reports from the Maine Forest Service
+
+## 1961-1962
+In 1961, there was little if any moth activity. No flights of any significance were recorded for that period. Observations of defoliation were made from the air as well as the ground. Spraying was not recommended for 1962 although infestation remained high, particularly in the Squapan Lake region and north. The same situation existed in 1962 in terms of moth flights. There was no major flight observed. In 1963, 479,000 acres in northern Aroostook County were sprayed.
+
+## 1963-1964
+In 1963, as was the case in 1961 and 1962, moth activity was minimal at the light traps. No fligh or significantly large numbers were recorded. However, a recommendation was made to spray the Oxbow area plus other more northerly locations of high populations which existed. This project was conducted over 58,100 acres in 1964.
+In 1964, budworms were especially rare in catches from the western parts of the State. An unusual catch of about 218 budworm moths were taken on the night of July 21-22 from a trap in Dover, New Hampshire. A few lingering strays were taken on the following nights. The source of the flight is unknown. Control action was not recommended for 1965.
+
+## 1965-1966
+Defoliation was less severe in 1965 and was largely confined to an area south of the Oxbow road and the Aroostook River, in an area which had never been sprayed. Other areas of defoliation were small and scattered or supported by insignificant budworm populations. Light traps were operated in 25 locations in Maine during 1965. All material was sent to Augusta for examination. There were no unusual catches. The trap in T9R5, Oxbow road is just northeast of the Oxbow-South area. Few budworm moths were captured elsewhere.
+In 1966, defoliation was restricted essentially to the Oxbow, Cary, and Punchard Brooks section of Aroostook County. All other areas were in good condition with light populations found. Catches suggested very slight increases in the more westerly budworm populations, but otherwise there were no unusual catches. Recommendations were made to treat the heavy population areas with
+a spray operation covering 92,162 acres in 1967.
+
+## 1967-1968
+For both years there was very little moth activity or flights observed. Nothing of major concern was recorded at the light trap stations. It became the policy of the department to avoid the use of DDT after the 1967 spray project. Thus
+attempts were started to find an effective substitute for DDT. This culminated in a pilot test using Sumthion (Fenitrothion) in the Oxbow area by the U.S. Forest Service during 1968. Four blocks of 2,640 acres were sprayed using 1 TBM plane on June 7th and 8th of 1968. The u.s. Forest Service also conducted a test using Zectran on 500 acres in that same year. This was applied by helicopter and achieved an unsuccessful 80% control of the budworm population in the area sprayed. At a summary conference in the fall of 1968, Federal and State entomologists recorrunended further control tests using Zectran during 1969. In addition, a recommendation was made to study the New Brunswick control operations using Sumithion (Fenitrothion) and to monitor its use of Zectran on an experimental basis.
+
+## 1969-1970
+In 1969. the budworm moth catches from Georgetown and Brunswick indicated the possible spread of the insect for there were no other signs of nearby budworm activity and it was assumed that these were "flights". A recommendation was made to spray 210,000 acres in the Oxbow road area southwest of Ashland using Accothion 8EC during 1970.
+In 1970, the feeling was generated that with the present technology the emphasis should be shifted from population reduction to foliage protection as needed, with the overall goal of keeping the trees alive. The 1971 damage was expected to be severe and action was considered necessary in order to prevent widespread mortality. A pilot test using Zectran was recommended for 1971. The test was to cover four 2300 acre blocks of spruce-fir fo~ests in the Oxbow area.
+
+## 1971-1972
+Again, there were very few large numbers of moths noted for these two years. The reduction in numbers or the small counts indicate reduced "flights". The 1971 situation appeared to be such that protective action would be needed for 1972. The inability to obtain drastic population reductions indicated that more frequent treatment would be necessary to achieve this goal than was formerly necessary with DDT in Maine. During 1971, a pilot test was conducted using Zectran on 9,200 acres in cooperation with the U.S. Forest Service. A rapid buildup of budworm populations during 1971 in the Oxbow and Cross Lake -
+Madawaska Lake areas resulted in the spraying of 500,000 acres using Zectran during 1972, the largest project conducted up to that time.
+In 1972, Washington County showed about 40,625 acres with moderate to severe defoliation. A recommendation was made to spray 450,000 total acres using Zectran and this was carried out in 1973. This area included the Allagash-St. Francis area, and the Webster Lake-Telos Lake area. During this project, there
+was a Federal restriction that no area sprayed in 1972 was to be sprayed again in 1973 (regardless of need) . This restriction was developed out of concern for the possible adverse effects that repeated spraying might have upon the environment.
+
+## 1973-1974
+In 1973, there were some 66,912 acres showing moderate to severe defoliation in Washington County. A tremendous flight of spruce budworm moths was reported off the coast of eastern Maine from Boothbay Harbor to Machias Seal Island off Cutrer. No determination was made as to whether the flights were made up of immigrants or local moths. A recommendation was made to spray 430,000 acres of spruce-fir forest in June of 1974. This operation was carried out using Zectran in a one quart of spray per acre mixture, rather the usual gallon for full operational use.
+In 1974, the moth flights covered the entire State south to Biddeford Pool. A determination was made that these flights came in on a cold front, as in 1973, accompanied by NE/SE winds. In Augusta, budworm moths were seen around lights and egg masses were found deposited on spruce trees. Field data showed that
+the predicted infestation for 1975 would be by far the most intensive and extensive that Maine, Quebec, and New Brunswick workers had ever experienced. A decision was made to spray an area of 2,233,500 acres in 1975. An additional 26,400 acres received experimental application of various insecticides.
+
+## 1975-1976
+The 1975 opetation far exceeded the size of any previous spray project. A major difference in the planning of the operation was the scarcity of insecticides revealed in 1974. This resulted for the first time in an inability to spray all the acreage recommended for treatment - of the 3.5 million acres recommended, 2.26 million acres were treated in the period of May 25th to June 12th, 1975. In general, the entire spruce-fir region of northern Maine and of eastern Washington County, excluding the sprayed areas, showed severe defoliation. Defoliation assessment within the spray areas was done in detail by ground and
+aerial observations. Although budworm seemed more frequent in the light trap collections in 1975, fewer seemed to come from outside of the infested spruce-fir forest type. Sprays used in 1975 were Sevin 4-oil, Zectran, and Sumithion (Fenitrothion). A 3.5 million acre spray operation was recommended for 1976.
+In 1976, all areas sprayed in 1975 showed improvement, with the Sumithion (Feni trothion) treatment area improving to a lesser degree. The 1976 spray operation was the largest cooperatively funded spray operation ever conducted in the United States. Sevin-4 oil and Dylox were the sprays used in this project. Virtually all areas sprayed with Sevin-4 oil showed improvement. Aerial reconnaisance of the entire spruce-fir region of northern Maine and eastern Washington County during July, 1976 was used to map areas of current budworm defoliation. Based on light trap and moth flight reports, it seemed that Maine's spruce budworm population received little if any boost from an influx
+of new females from outside the State. A decline in the budworm populations was expected for 1977. Thus, a recommendation was made to spray 930,000 acres of spruce-fir forest during that year.
+
+## 1977
+Spruce budworm moth activity in 1977 was again rather low and comparable to 1976 with only minor and somewhat localized flights reported. A total of 15 traps were operated in 1977 statewide (Figure 12). The operation schedules for these traps varied much more widely in 1977 as a greater effort was made to use this survey tool for other major forest insect defoliators such as the saddled promi­nent. Those traps placed in hardwood areas of the State began operation much earlier in June than in softwood areas. All traps, however, were in operation during the flight period of the spruce budworm moths. Although flight activity for the spruce budworm moths was somewhat extended, the peak of activity was about a week later in 1977 than in 1976. This later flight period in 1977 seems more normal for the species in Maine based on past records. Even though results shows a number of nights in July with rather high moth activity, the only night where a small flight seemed evident was on July 16 (night of July 15-16). The remaining nights of high numbers were probably the result of local activity peaks. This evidence of the relatively local nature of moth activity in 1977 was also noted in the more striking moth flights in Presque Isle and Millinocket in mid-July. In these cases moths checked seemed to be fresher and generally less damaged than normally found in more long distance flights such as we had in 1973. It was felt that less concentrated budworm popu­lations and the lack of suitable weather patterns precluded the development of flights in 1977. As a result of the local moth flight situation in 1977 some population mixing and reshuffling did occur but no large scale population buildups as a result of outside influence should occur in 1978.
+
+## 1978
+Pre-treatment samples did not contain any appreciable numbers of undersized or apparently diseased larvae as were found in 1975 and 1976. Population levels, measured by pretreatment checks of each spray area, indicated larval densities comparable to that predicted by 1977 egg mass counts. A possible exception was the Allagash-St. John zone where egg predictions were for high populations but actual larval counts were extreme. Data generally indicated normal survival. Late in the development cycle some abnormalities were observed in the northern portion of the State where populations were extreme. Sixth instar larvae, pupae and resulting moths from this area were far smaller than normal. This size reduction is probably the results of starvation as most 1978 foliage was consumed by the early 5th instar. Small budworm were observed nearly everywhere in northern Maine where much "backfeeding" occurred but most areas had some percentage of normal sized adults. If starvation stress has a noticeable effect, it should show in the 1979 population. In central Maine, late development stages of the insect were normal and moths were generally normal size.
+
+Moth activity was much more pronounced in 1978 than in 1977 and moths could be found nearly everywhere in the spruce-fir region of the State in early July and often in great numbers. In spite of this and the fact that
+locally heavy flights were reported from many cities and towns within close proximity to spruce-fir stands such as Ashland, Presque Isle, Caribou, Houlton, and Millinocket, frontal systems did not develop which could carry
+massive moth flights far from sources of infestation such as occurred in other years. A series of 17 light traps were operated during the months of June and July of 1978 to monitor moth activity. These traps were distributed
+throughout the State. The peak of spruce budworm moth activity as monitored by these traps seemed to be about one week earlier than the average season in Maine. Numbers of moths in the traps were the highest recorded in recent years and activity seemed to be condensed into one broad peak from July 6-10 (exclusive of the Topsfield trap in eastern Maine). This may have been due to the fairly consistent weather patterns which occurred at the time. In other seasons as many as 3 or 4 often quite widely separated peaks of activity have been reported but associated weather patterns were also quite variable. The overall period of moth activity in 1978 was fairly consistent throughout the season and began
+and terminated about one week earlier than in 1977. The moths in the traps seemed to be of average size and were generally not too battered, indicating only short flight range and good vigor.
+
+## 1979
+Early in the development cycle, larvae throughout the state seemed healthy (i.e. no appreciable numbers of undersized or apparently diseased larvae were found). Counts of early needle miners revealed expected numbers
+of larvae, suggesting normal winter survival. As the larvae entered the fourth instar, May 23 to June 1, the entire state experienced a prolonged period of heavy rain. Temperatures during this period were cool but not extreme. Following the rainy period, a marked drop in larval density was noted and laboratories began to report high numbers of dead larvae. These larvae apparently drowned. Larval reduction over the rainy period ranged from 10 to 50 percent and probably far exceeded normal losses for a similar period. The 1979 crop of pupae and moths seemed of normal size, survival, and vigor.
+
+A total of 16 light traps were operated atatewide during the 1979 season to determine the distribution and abundance of major lepidopterous forest insect pests, especially the spruce budworm. Spruce budworm moth activity was down from 1978 especially in traps located within the spruce-fir belt (notably traps at Allagash, Clayton Lake, Garfield and T6R19), Traps in more western southeastern and southern portions of the State (notably Kingfield, Elliotsville Plt., Meddybemps,
+Brunswick, Hollis Center and Washington) showed much higher catches in 1979 than in 1978. The period of moth activity in 1979 was just slightly later than that experienced in 1978 but was somewhat more prolonged. The peak of activity (except for the Kingfield and Allagash traps) began around July 8 and ran through July 16. Overall catches showed a strong single peak of activity as they did in 1978 rather than the 2-4 peaks experienced in some other years. The uniformity of larval development statewide may have contributed to this. Longer range moth flights were more evident in 1979 especially in western and eastern areas of the State. One noticeable moth flight was reported from Rumford between July 13 and 14 and several inches of moths accumulated beneath lights in the area. Lesser flights occurred in eastern Maine in mid July. It appears that we did not experience the moth inflights into spruce-fir stands in 1979 that we experienced in 1973 and 1974 but rather had fairly significant but somewhat limited outflight activity from infested stands to areas to the south and east. Most of this exodus flight activity occurred between July 10 and July 17 except in the Kingfield
+trap which showed a large inflight between July 22 and July 24. It is suspected that the large numbers collected in the Kingfield trap may have come from infested areas in the western mountains where larval development was retarded.
+
+## 1980
+In 198O, development of spruce budworm larvae was characterized by an early emergence followed by an extremely slow larval development period. Slow larval development was due to abnormally cool weather in May and June. Fir bud development started well behind the larvae but by mid-May all development plots showed foliage to be ahead. Bud development, while slower than in 1979, was not sharply slowed. After mid-May, bud development stayed ahead of the insects through the spray period and as a result conditions were favorable for a successful spray treatment. In nearly all spray blocks, larvae were small and feeding slowly on well developed buds. Pre-spray feeding damage was apparent only in Western Maine where populations were highest. Cool tempcratures and slow larval development continued through June. 
+Feeding larvae were common, even in Southern Maine, as late as June 30. In northern and western mouhtain areas where development is normally slow, pupation was not at peak until the second week of July. Pupation extending into July is unusual in Maine and did not occur in the mid to late 7O's.
+
+## 1981
+Generally mild weather in 1981 and the presence of a good 1980 foliage and bud compliment provided an abundant food supply for developing larvae. The presence of good quality food and mild weather conditions led to normal size larvae of good vigor in most portions of the State. Larvae seemed normal and vigorous even in the southeast and northeast where populations were high and tree condition poor. Larval survival in unsprayed areas was extremely variable in 1981. Survival on fir check lines ranged from more than 50% to.5%. The highest surviorship occurred in areas of low population in westcentral Maine and in some portions of northwestern Maine. Low survivorship occurred where prespray counts were as low as 15 and as high as 45 larvae per 18" branch tip. Normal fir survival in Maine ranges from 15 to 30 per cent and is usually highest in low population areas.
+In most areas, survival on spruce was less than 15% which has been normai over the last five years. In nearly all cases the spruce survival rate for an area was below the fir survival rate for that area. Unusually high larvae survival rates for spruce, exceeding 30%, were noted in low population areas of westcentral Maine. Larval survival of more than 30% on spruce was also seen in portions of southeastern Maine where spruce tree conditions poor and populations were high·
+
+Twenty light traps were operated statewide during June and July of 1981 to determine distribution and abundance of major lepidopterous forest pests.Spruce budworm flight activity seemed to occur approximately a week early this year at most trap locations possibly due to climatic conditions early in theseason. The Dennistown, Eustis and Garfield traps had very low catches of budworm this year, while remaining traps had catches comparable to previous years. The greatest moth activity occurred in eastern Maine where some moth inflights appear
+to have occurred (Table 8). Most of the activity of other trap locations appears to have been local flight, with very few heavy catches per night. One· unofficia1' report was received of a heavy flight of budworm moths on Mt. Desert Island.
+
+## 1982
+Conditions in 1982 were very unusual and changed frequently. At the beginning of the 1982 season, bud development was slower than normal and insect development was well ahead. By the late third instar, bud development surged and soon was advanced compared to normal insect development. This change occurred because a cool, dry period apparently favored shoot development and retarded insect development. During the middle instars, a very warm period began in northern Maine while the south remained cool. High temperatures in the north resulted in very rapid development of insects and buds. By early June, development in the north was ahead of development in the southeast. The rapid advance in development in the north caused increased host damage, but ideal spray weather allowed rapid completion of the project thus holding defoliation to acceptable limits. Prespray damage in the north was greater than any other area, nevertheless prespray defoliation levels were acceptable. Most blocks were sprayed near the desired release date. When an overall comparison is made between 1982 conditions and those seen in the prior three seasons, 1982 was probably the least favorable in terms of larval vs. foliage development in some cases.
+
+Spruce budworm moth activity increased in 1982, with fourteen of the twenty light traps exhibiting higher numbers of budworm than in 1981. Moth numbers were down in four of the five eastern traps, only the most eastern trap at Meddybemps showed an increase. While most of the moth activity can be attributed to local populations, the data indicates that the following dates and locations had inflights from surrounding areas:
+- July 12 - Passadumkeag, Elliotsville
+- July 15 - Hay Lake
+- July 18 - Kingfield
+- July 21 - Elliotsville, Hay Lake, Hollis Center, Washington
+- July 24 - Kingfield, Elliotsville, Millinocket
+- July 25 - T6 R19
+Most of the flights were fairly short in duration again this year and while the total number of moths caught was higher than 1981, the number is significantly lower than in the late 1970's. There was one unconfirmed moth flight in Bar Harbor, but no confirmed reports were received at the Entomology Laboratory
+
+## 1983
+Eighteen light traps were operated throughout Maine during the period of major moth activity in 1983. A summary of spruce budworm moths collected in the state is shown in Table 6. While budworm moths can be active from mid-June to early August, the data from this year exhibits two major periods of moth activity that can be the result of inflights from 
+
+## 1984
+Early instar development in 1984 was slowed by extremely wet weather. Temperatures during the wet period in early May were moderate and no large reductions in budworm population due to adverse weather were noted. Beginning in early June, weather patterns changed drastically. Most of June was characterized by warm, dry conditions which were extremely favorable for rapid, healthy growth of late instar budworm. Pupal size seemed normal in 1984. Very heavy rains occurred through much of the infested area during the
+moth activity period. Larval survival rates in 1984 were consistent and extremely high throughout the state. Mean survival on fir and spruce in unsprayed areas was 61.3 and 48.9 respectively. Rates this high have been recorded in spots in the recent past, but statewide means this high have not been recorded in the 70's or 80 1s. Reasons for the high survival rates are uncertain, but favorable weather during June, plentiful foliage, and high quality food from an abundant flower crop surely contributed.
+
+A total of 20 light traps situated throughout the State were again operated during the flight period of the spruce budworm moths. During this period a total of 17,983 moths were collected
+with the average number of moths per trap for the season at 895. As can be seen from the accompanying table this is the lowest moth catch since 1972. Although moths were caught in all
+traps, the numbers were very low, especially in southern portions of the State, areas with few hosts nearby, and near treated areas. Moths in most traps were also larger, more clearly marked and were not as battered as some years, indicating only local movement. Periods of flight activity were more gradual which also indicates a lack of inflights which are generally characterized by striking peaks. Although lower populations may have played a role in these low numbers in 1984, weather patterns were also likely to have been invol.ved. Our weather during the period showed ideal conditions for local moth flight activity, but we did not seem to have the appropriate frontal system movements which favor large inflights.
+
+## 1985
+A total of 20 light traps situated throughout the State were again operated during the flight period of the spruce budworm moths. During this period a total of 13,233 molhs were corlected with the average number of noths per trap for the season at 661. As can be seen from the accompanying table, this is the lowest moth catch levels since 1970 and the second consecutive year of decline. Moths were caught in all but two traps as was the case in 1984. They were larger and more cleanly marked indicating mostly local populalions. The only real strong evidence of an inflight was at St. Francis (Allagash) on the night of July 15. This was supported by the fact that local populations there were quite light. Another interesting aspect noted in 1985 populations concerned development. In advanced sites such as Bradley (parasite point), moth emergence seemed to be fairly normal or possibly even early to start and normal to finish. Light trap stations at Meddybemps and Greenbush somewhat reflect this (Van Buren catches reflect othet influences). In most other sites, moth energence was 1 to 2 weeks late. This is one of the few years in which we have not had to include June dates on our Table and moths could be found as strays into August. 
+
+## 1986-1987-1988
+A total of 20 light traps situated in forested areas throughout the state were operated in 1986, 1987, and 1988 during the spruce budworm moth flight period. Total moths trapped dropped through the period from a level which was already low 1985. Seasonal catch during the period was 1365 moths in 1986, 464 in 1987, and 209 in 1988. Total catch in 1988 was the lowest since 1967. This decline parallels other populatíon measurements.
+Changes in moth catch distribution also reflect regional population declines. In 1995, 18 of 20 traps yielded moths. This proportion was reduced to 15 of 20 in 86, and 9 of 20 in both 87 and 88. In 1988, all moths were caught in southern or eastern Maine traps and 86% of all moths came from one southeastern trap (Meddybemps). A small moth flight may have occurred in St. Francis (Allagash) in 1986. No moth flights were evident in 1997, for the first time since 1970. The period of peak moth activity was slightly later than normal in 1986 and 1988.
+
+# Pupa data
+
+The pupation date was calculated using Kala's model and code and the nclimgrid temperature data.
+
 ```{r}
-#| label: maptraps
+ids <- unique(Maine.dat$id)
+
+Pupae <- lapply(ids,function(x) {
+  a <- read_csv(paste0("./phenology/id_",x,".csv"))
+  pivot_longer(a,cols=1:100) %>% group_by(value) %>% summarise(Pupae=n()) %>% rename(DOY=value) %>% mutate(id=x)
+})
+
+Pupae.tb <- do.call(rbind,Pupae) %>% group_by(id) %>% nest(Pupae=c(DOY,Pupae))
+
+```
+
+# Weather 
+
+```{r}
+Weather <- read_csv("maine_trap_weather_data.csv")
+
+Weather.tb <- Weather %>% group_by(id) %>% nest(Weather=c(Date,tmax,tmin,prcp,tavg)) %>% dplyr::select(-Year,-Longitude,-Latitude) %>% mutate(id=as.character(id))
+```
+
+# Defoliation
+
+```{r}
+# Getting the defoliation from Figure 22 in "Spruce budwom in Maine: The end of the outbreak" Technical Report No. 28, 1989
+# The data was digitized from the figure and converted to km2
+Defoliation <- readxl::read_xlsx("Annual light trap reports in Maine Forest Service reports.xlsx") %>% 
+  dplyr::select(1:2) %>% 
+  rename(Defoliation=2) %>%
+  mutate(Defoliation=Defoliation/247.1)
+```
+
+####################
+# All data together
+####################
+```{r}
+# Maine.tb <- left_join(Maine.tb,Pupae.tb) %>% left_join(Weather.tb) %>% left_join(Defoliation)
+# write_rds(Maine.tb,"Maine_full_dataset.rds")
+
+Maine.tb <- read_rds("Maine_full_dataset.rds")
+
+# rm(Weather,Weather.tb,Pupae,Pupae.tb,Maine.dat)
+```
+
+# Data exploration
+
+## Trap locations
+
+```{r}
+#| label: fig-maptraps
 #| fig-cap: "Map of trap locations by year"
 
-Traps.location <- Obs %>%
-  dplyr::select(year,lat,long) %>%
-  distinct()
+Traps.location <- Maine.tb %>%
+  dplyr::select(Year,Latitude,Longitude,id)
 
 # Get provinces and states
 canada <- ne_states(country = "canada", returnclass = "sf")
@@ -125,13 +263,13 @@ usa_labels <- eastern_usa |>
 ggplot() +
   geom_sf(data = eastern_canada, fill = "lightgray", color = "white") +
   geom_sf(data = eastern_usa, fill = "lightgray", color = "white") +
-  geom_text(data = canada_labels, aes(x = X, y = Y, label = name), size = 3.5) +
-  geom_text(data = usa_labels, aes(x = X, y = Y, label = name), size = 3.5) +
+  geom_text(data = canada_labels, aes(x = X, y = Y, label = name), size = 2) +
+  geom_text(data = usa_labels, aes(x = X, y = Y, label = name), size = 2) +
   geom_point(data = Traps.location, 
-             aes(x = long, y = lat),
+             aes(x = Longitude, y = Latitude),
              color = "red", size = 2, alpha = 0.7) +
   coord_sf(xlim = c(-72, -62), ylim = c(44, 48)) +
-  facet_wrap(~year) +
+  facet_wrap(~Year,ncol=5) +
   labs(
  #   title = "Trap Locations by Year",
     x = "Longitude",
@@ -140,498 +278,588 @@ ggplot() +
   annotation_scale(location = "br", width_hint = 0.2) +
   theme_bw()
 
+rm(canada,canada_labels,eastern_canada,usa,usa_labels,Traps.location,eastern_usa)
 ```
 
-The data set included in this analysis contains only sites for which \> 29 adults were collected over an interval of at least 30 nights. The number of locations each year is as follows: N = `r n_per_year %>% dplyr::filter(year==1972) %>% pull(n)` in 1972, N = `r n_per_year %>% dplyr::filter(year==1973) %>% pull(n)` in 1973, N = `r n_per_year %>% dplyr::filter(year==1974 %>% pull(n))` in 1974, N = `r n_per_year %>% dplyr::filter(year==1975) %>% pull(n)`  in 1975, N = `r n_per_year %>% dplyr::filter(year==1976) %>% pull(n)` in 1976, N = `r n_per_year %>% dplyr::filter(year==1977) %>% pull(n)` in 1977, N = `r n_per_year %>% dplyr::filter(year==1978) %>% pull(n)` in 1978, N = `r n_per_year %>% dplyr::filter(year==1979) %>% pull(n)` in 1979, N = `r n_per_year %>% dplyr::filter(year==1980) %>% pull(n)` in 1980.
+The dataset contains daily observations of moth capture at `r length(unique(Maine.dat$id))` traps between `r min(Maine.dat$Year)` and `r max(Maine.dat$Year)`. The trap network provides a good geographical coverage of the state during the 1969-1983 period (@fig-maptraps).
 
-# Characterization of flight season
-
-```{r obs-logistic}
-#| echo: false
-# Fit logistic curves for each id
-logistic_fits <- Obs |>
-  group_by(id) |>
-  summarize(
-    # Fit logistic to Obs.cumsum
-    obs_fit = list(tryCatch(
-      nls(sumday.cumsum ~ SSlogis(date, Asym, xmid, scal),
-        control = nls.control(tol = 1e-9),
-        start=list(Asym=1,xmid=195,scal=3),
-        algorithm = "port",
-        lower=c(Asym=0.96,xmid=165,scal=0),
-        upper=c(Asym=1.05,xmid=210,scale=10)),
-      error = function(e) NULL
-    )),
-    .groups = "drop"
-  ) |>
-  mutate(
-    # Extract parameters for Obs
-    obs_params = map(obs_fit, ~if(!is.null(.x)) tidy(.x) else NULL)
-  )
-
-# Extract the midpoint (xmid) parameter for each curve
-inv_logis.f <- function(y,params) {
-  Asym <- params$estimate[1]
-  xmid <- params$estimate[2]
-  scal <- params$estimate[3]
-  xmid - scal * log(Asym/y - 1)
-}
-logistic.points <- logistic_fits %>%
-  mutate(
-    obs_5p = map_dbl(obs_params, ~if(!is.null(.x)) inv_logis.f(0.05,.x) else NA_real_),
-    obs_midpoint = map_dbl(obs_params, ~if(!is.null(.x)) .x$estimate[.x$term == "xmid"] else NA_real_),
-    obs_95p = map_dbl(obs_params, ~if(!is.null(.x)) inv_logis.f(0.95,.x) else NA_real_)
- ) %>%
-  mutate(obs_duration=obs_95p-obs_5p) %>%
-  dplyr::select(id, obs_5p,obs_midpoint,obs_95p,obs_duration) %>% 
-  dplyr::filter(if_any(.cols = c("obs_5p","obs_midpoint","obs_95p"), ~ !is.na(.))) %>% 
-  left_join(Obs) %>% dplyr::select(id,obs_5p,obs_midpoint,obs_95p,obs_duration,year,lat,long,src) %>%
-  group_by(id) %>%
-  slice(1) %>%
-  mutate(year=as.factor(year)) %>%
-  ungroup()
-```
-
-Across all the traps and years, the mean 5th and 95th percentiles of the flight periods are `r format(as.Date(doy_to_date.f(mean(logistic.points$obs_5p,na.rm=TRUE),1978)),"%B %d")` (sd=`r round(sd(logistic.points$obs_5p,na.rm=TRUE),digit=1)` days) and `r format(as.Date(doy_to_date.f(mean(logistic.points$obs_95p,na.rm=TRUE),1978)),"%B %d")` (sd=`r round(sd(logistic.points$obs_5p,na.rm=TRUE),digit=1)` days), respectively. The median flight date is `r format(as.Date(doy_to_date.f(mean(logistic.points$obs_midpoint,na.rm=TRUE),1978)),"%B %d")` (sd=`r round(sd(logistic.points$obs_midpoint,na.rm=TRUE),digit=1)`) and the duration of a flight season (i.e., number of days between the 5th and 9th percentile) `r round(mean(logistic.points$obs_duration,na.rm=TRUE),digit=1)` (sd=`r round(sd(logistic.points$obs_duration,na.rm=TRUE),digit=1)`) with a minimum of `r round(min(logistic.points$obs_duration,na.rm=TRUE),digit=1)` and a maximum of `r round(max(logistic.points$obs_duration,na.rm=TRUE),digit=1)` days.
-
-```{r,show=FALSE}
-#| label: tbl-regressions
-#| tbl-cap: "Effects of latitude, longitude and year on flight period descriptors"
-
-t1 <- tbl_regression(lm(obs_5p~lat+long+lat*long+year,data=logistic.points))
-t2 <- tbl_regression(lm(obs_midpoint~lat+long+lat*long+year,data=logistic.points))
-t3 <- tbl_regression(lm(obs_95p~lat+long+lat*long+year,data=logistic.points))
-t4 <- tbl_regression(lm(obs_duration~lat+long+lat*long+year,data=logistic.points))
-
-tbl_merge(
-  list(t1, t2, t3, t4),
-  tab_spanner = c("5th percentile", "50th percentile", "95th percentile", "duration")
-)
-```
-
-The flight phenology described by the date of the 5th, 50th and 95th percentile of trap captures is affected by the year but not by latitude or longitude at the spatial scale of our study (@tbl-regressions). There is no significant effect of latitude, longitude, or year on the duration of the flight season. 
+## Pupation and flight phenology plots
 
 ```{r}
-#| label: flight-period
-#| fig-cap: "Period of flight (5th, 50th and 95th percentiles of fitted observations)"
-#| 
+Maine.pheno.plots <- Maine.tb %>%
+  arrange(Year) %>%
+  group_by(Year,id) %>%
+  summarise(Plot = list({
+    M <- Moths[[1]]
+    P <- Pupae[[1]]
+    full_join(M,P) %>% arrange(DOY) %>% mutate(Moths=Moths/sum(Moths,na.rm=TRUE),Pupae=Pupae/sum(Pupae,na.rm=TRUE)) %>% pivot_longer(cols=c("Moths","Pupae"),names_to="Stage",values_to="Proportion") %>% ggplot(.,aes(x=DOY,y=Proportion,fill=Stage)) + geom_bar(stat="identity",position="dodge") + ggtitle(id)
+  }))
 
-log.temp <- logistic.points %>%
-  mutate(year = fct_relevel(year,as.character(1972:1980))) %>%
-  group_by(year) %>%
-  arrange(obs_midpoint) %>%
-  mutate(id2=1:n())
-
-log.mean.mid <- log.temp %>%
-  group_by(year) %>%
-  summarise(midmean=mean(obs_midpoint))
-
-ggplot(log.temp,aes(x=obs_midpoint,y=id2)) + 
-      geom_point(col="red",size=2) +
-            geom_point(aes(x=obs_5p)) +
-                    geom_point(aes(x=obs_95p)) +
-                              geom_segment(aes(x=obs_5p,xend=obs_95p,yend=id2)) +
-                                        geom_vline(data=log.mean.mid,aes(xintercept=midmean),col="blue") +
-                                                    facet_grid(rows=vars(year)) +
-                                                                  ylab("Trap") + xlab("DOY")
-
-```
-
-The annual median of the flight period (annual mean of 50th percentile for each trap) can vary by up to 12 days (@flight-period). The flight season was relatively early in 1975 and 1976, and late in 1974. We hypothesize that the inter-annual differences are driven by temperature before July 1st.     
-
-# Effects of spring temperature on the start of the flight season
-
-::: {layout-ncol=1}
-```{r}
-#| label: tbl-springT
-#| tbl-cap: "Effect of annual degree-days on flight start date"
-#| 
-
-# library(openmeteo)
-# Obs.T <- do.call("rbind",lapply(ids,function(i) {
-#   year <- paste0("19",substr(i,9,10))
-#   lat <- as.integer(substr(i,1,4))/100
-#   lon <- as.integer(substr(i,5,8))/100*-1
-#   weather_history(location = c(lat,lon),
-#     start = paste0(year,"-01-01"),
-#     end = paste0(year,"-12-31"),
-#     hourly="temperature_2m") %>% mutate(id=i)
-# }))
-# write.csv2(Obs.T,file="2m_temperature_at_sites.csv")
-
-# Obs.T <- read.csv2("2m_temperature_at_sites.csv")
-
-# Calculate DD over 5C
-# Obs.DD <- Obs.T %>% 
-#   mutate(DOY=yday(datetime)) %>%
-#   dplyr::filter(DOY < 172) %>%
-#   summarise(
-#     T=mean(hourly_temperature_2m,na.rm=TRUE),
-#     .by=c(id,DOY)
-#   ) %>% 
-#   summarise(
-#     ERA_DD=sum(ifelse(T>5,T,0)),
-#     .by=c(id)
-#   )
-# write.csv2(Obs.DD,file="Obs.DD.csv")
-
-Obs.DD <- read.csv2("Obs.DD.csv")
-
-logistic.points <- logistic.points %>% 
-  left_join(Obs.DD)
-
-tbl_regression((lm(obs_5p~ERA_DD,data=logistic.points))) %>%
-   add_glance_source_note(include = c(r.squared, nobs))
-```
-```{r}
-#| label: fig-springT
-#| fig-cap: "Effect of annual degree-days on flight start date"
-#| 
-
-ggplot(logistic.points,aes(x=ERA_DD,y=obs_5p)) +
-    geom_point() +
-      geom_smooth(method = "lm", se = TRUE, color = "blue") +
-      xlab("Degree days over 5C from January 1st to June 21st") +
-      ylab("DOY of 5th percentile trap captures")
-
-```
-
-A significant effect of year on flight phenology suggests that spring temperature may affect the start of the flight season. To test this hypothesis, we retrieved daily temperature data from the ERA5-Land dataset for each year at each trap location and calculated the degree-days over 5C from January 1st to June 21st (summer solstice). The number of degree days has a significant but weak effect on the flight start date (@tbl-springT,@fig-springT).
-
-# Validation of a phenology model
-
-```{r}
-#| label: biosim-run
-
-# The R BioSIM package does not have the option to set the starting sink.number
-# of L2o, the default is 100. We want 1000 so we run the simualtions 10 times.
-# We checked that the seed is different at every run, so we don't have 10 times the
-# same results
-
-####################################################################################
-# Run BioSIM
-####################################################################################
-# ids <- unique(Obs$id)
-# for (i in 1:10) {
-# Biosim.pred <- do.call("rbind",lapply(ids,function(i){
-#   year <- as.integer(paste0("19",substr(i,9,10)))
-#   lat <- as.integer(substr(i,1,4))/100
-#   lon <- as.integer(substr(i,5,8))/100*-1
-#   generateWeather(modelNames = "Spruce_Budworm_Biology",
-#                   fromYr = year,
-#                   toYr = year,
-#                   id = i,
-#                   latDeg = lat,
-#                   longDeg = lon,
-#                 )$Spruce_Budworm_Biology
-# }))
-# write.csv2(Biosim.pred,file=paste0("Biosim.pred_",i,".csv"))
-# }
-
-Biosim.pred <- do.call("rbind",lapply(1:10,function(i) read.csv2(file=paste0("Biosim.pred_",i,".csv"))))
-
-# Sum the 10 runs for each trap and day
-# Calculate the cumulative sum of percent flight
-# Reduce the times series to Jun 15th to Aug 31st
-Biosim.pred <- Biosim.pred %>%
-  mutate(DOY = as.integer(format(as.Date(paste(Year, Month, Day, sep = "-")), "%j"))) %>%
-  arrange(KeyID,DOY) %>%
-  dplyr::select(KeyID,Latitude,Longitude,Year,Month,Day,DOY,L2o,MalePupae,FemalePupae,
-    MaleAdult,FemaleAdult,MaleEmergence,FemaleEmergence,MaleFlight,FemaleFlight) %>%
-  group_by(KeyID,DOY) %>%
-  summarise(across(L2o:FemaleFlight,\(x) sum(x)/10)) %>%
-  mutate(Adult.Flight = MaleFlight+FemaleFlight) %>%
-  ungroup() %>%
-  group_by(KeyID) %>%
-  dplyr::filter(DOY > 165 & DOY < 244) %>%
-  mutate(Year = paste0("19",substr(KeyID,9,10)),
-      Biosim.cumsum = cumsum(Adult.Flight/(sum(Adult.Flight)))) %>%
-  ungroup() %>%
-  rename(id=KeyID,date=DOY) %>%
-  dplyr::select(id,Year,date,Adult.Flight,Biosim.cumsum)  
-```
-
-
-```{r}
-#| label: biosim-logistic
-
-logistic_biosim <- Biosim.pred |>
-  group_by(id) |>
-  summarize(
-    # Fit logistic to Obs.cumsum
-    bio_fit = list(tryCatch(
-      nls(Biosim.cumsum ~ SSlogis(date, Asym, xmid, scal),
-        control = nls.control(tol = 1e-9),
-        start=list(Asym=1,xmid=195,scal=3),
-        algorithm = "port",
-        lower=c(Asym=0.96,xmid=165,scal=0),
-        upper=c(Asym=1.05,xmid=243,scale=10)),
-      error = function(e) NULL
-    )),
-    .groups = "drop"
-  ) |>
-  mutate(
-    # Extract parameters for Obs
-    bio_params = map(bio_fit, ~if(!is.null(.x)) tidy(.x) else NULL)
-  )
-
-# Eliminate problematic fits
-logistic_biosim <- logistic_biosim %>% dplyr::filter(!sapply(bio_fit, \(x) is.null(x[[1]])))
-
-biosim.points <- logistic_biosim %>%
-  mutate(
-    bio_5p = map_dbl(bio_params, ~if(!is.null(.x)) inv_logis.f(0.05,.x) else NA_real_),
-    bio_midpoint = map_dbl(bio_params, ~if(!is.null(.x)) .x$estimate[.x$term == "xmid"] else NA_real_),
-    bio_95p = map_dbl(bio_params, ~if(!is.null(.x)) inv_logis.f(0.95,.x) else NA_real_)
- ) %>%
-  mutate(bio_duration=bio_95p-bio_5p) %>%
-  dplyr::select(id, bio_5p,bio_midpoint,bio_95p,bio_duration)
-
-compare.points <- inner_join(logistic.points,biosim.points) %>%
-  dplyr::select(-X) %>%
-  mutate(
-    obs_bio_5p = obs_5p - bio_5p,
-    obs_bio_midpoint = obs_midpoint - bio_midpoint,
-    obs_bio_95p = obs_95p - bio_95p,
-    obs_bio_duration = obs_duration - bio_duration
-  )
-```
-
-```{r}
-#| label: fig-compare-lm
-#| fig-cap: "Observed vs predicted flight phenology"
-#| 
-
-p1 <- ggplot(compare.points,aes(x=obs_5p,y=bio_5p)) + 
-    geom_point(aes(color=year)) +
-    geom_abline() +
-    geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
-    labs(
-      title = "DOY of 5th percentile trap capture",
-      x = "Observed DOY",
-      y = "Predicted DOY"
-    ) 
-
-p2 <- ggplot(compare.points,aes(x=obs_midpoint,y=bio_midpoint)) + 
-  geom_point(aes(color=year)) +
-  geom_abline() +
-  geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
-  labs(
-      title = "DOY of median trap capture",
-      x = "Observed DOY",
-      y = "Predicted DOY"
-  ) 
-p3 <- ggplot(compare.points,aes(x=obs_95p,y=bio_95p)) + 
-  geom_point(aes(color=year)) +
-  geom_abline() +
-  geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
-  labs(
-      title = "DOY of 95th percentile trap capture",
-      x = "Observed DOY",
-      y = "Predicted DOY"
-  ) 
-p4 <- ggplot(compare.points,aes(x=obs_duration,y=bio_duration)) + 
-  geom_point(aes(color=year)) +
-  geom_abline() +
-  geom_smooth(method = "lm", se = TRUE, color = "firebrick") +
-  labs(
-      title = "Trap capture duration",
-      x = "Observed (days)",
-      y = "Predicted (days)"
-  ) 
-
-marrangeGrob(list(p1,p2,p3,p4),ncol=2,nrow=2)
-```
-```{r}
-#| label: fig-compare-hist
-#| fig-cap: "Observed vs predicted flight phenology"
-#| 
-
-m <- mean(compare.points$obs_bio_5p)
-s <- sd(compare.points$obs_bio_5p)
-p1 <- ggplot(compare.points,aes(x=obs_bio_5p)) + 
-  geom_histogram(bins = 10, fill = "steelblue", color = "white") +
-  geom_vline(xintercept = m, color = "red", linewidth = 1) +
-  geom_vline(xintercept = c(m - s, m + s), color = "red", linetype = "dashed") +
-  annotate("text", x = m, y = Inf, label = paste("Mean =", round(m, 1)), 
-           vjust = 2, hjust = -0.1, color = "red") +
-  annotate("text", x = m, y = Inf, label = paste("SD =", round(s, 1)), 
-           vjust = 4, hjust = -0.1, color = "red") +
-            xlab("5th percentile observations - predicted")
-
-m <- mean(compare.points$obs_bio_midpoint)
-s <- sd(compare.points$obs_bio_midpoint)
-p2 <- ggplot(compare.points,aes(x=obs_bio_midpoint)) + 
-  geom_histogram(bins = 10, fill = "steelblue", color = "white") +
-  geom_vline(xintercept = m, color = "red", linewidth = 1) +
-  geom_vline(xintercept = c(m - s, m + s), color = "red", linetype = "dashed") +
-  annotate("text", x = m, y = Inf, label = paste("Mean =", round(m, 1)), 
-           vjust = 2, hjust = -0.1, color = "red") +
-  annotate("text", x = m, y = Inf, label = paste("SD =", round(s, 1)), 
-           vjust = 4, hjust = -0.1, color = "red") +
-            xlab("50th percentile observations - predicted")
-
-m <- mean(compare.points$obs_bio_95p)
-s <- sd(compare.points$obs_bio_95p)
-p3 <- ggplot(compare.points,aes(x=obs_bio_5p)) + 
-  geom_histogram(bins = 10, fill = "steelblue", color = "white") +
-  geom_vline(xintercept = m, color = "red", linewidth = 1) +
-  geom_vline(xintercept = c(m - s, m + s), color = "red", linetype = "dashed") +
-  annotate("text", x = m, y = Inf, label = paste("Mean =", round(m, 1)), 
-           vjust = 2, hjust = -0.1, color = "red") +
-  annotate("text", x = m, y = Inf, label = paste("SD =", round(s, 1)), 
-           vjust = 4, hjust = -0.1, color = "red") +
-            xlab("95th percentile observations - predicted")
-
-m <- mean(compare.points$obs_bio_duration)
-s <- sd(compare.points$obs_bio_duration)
-p4 <- ggplot(compare.points,aes(x=obs_bio_duration)) + 
-  geom_histogram(bins = 10, fill = "steelblue", color = "white") +
-  geom_vline(xintercept = m, color = "red", linewidth = 1) +
-  geom_vline(xintercept = c(m - s, m + s), color = "red", linetype = "dashed") +
-  annotate("text", x = m, y = Inf, label = paste("Mean =", round(m, 1)), 
-           vjust = 2, hjust = -0.1, color = "red") +
-  annotate("text", x = m, y = Inf, label = paste("SD =", round(s, 1)), 
-           vjust = 4, hjust = -0.1, color = "red") +
-            xlab("Differences between observed and predicted flight period duration")
-
-marrangeGrob(list(p1,p2,p3,p4),ncol=2,nrow=2)
-```
-
-```{r}
-
-logistic_overlap <- function(l1,l2) {
-#  l1 <- l1[[1]]
-#  l2 <- l2[[1]]
-  if (!is.null(l1) & !is.null(l2)) {
-    mu1 <- l1[l1$term == "xmid",]$estimate
-    s1 <- l1[l1$term == "scal",]$estimate
-    mu2 <- l2[l2$term == "xmid",]$estimate
-    s2 <- l2[l2$term == "scal",]$estimate
-    res <- integrate(function(x) {
-      pmin(dlogis(x, mu1, s1), dlogis(x, mu2, s2))
-    }, lower = 166, upper = 243)$value
-  } else {
-    return(NA)
+pdf(file="Maine_pheno.pdf",width=9,height=6)
+maxpage <- floor(nrow(Maine.tb)/9)
+for (l in 1:maxpage) {
+  for (k in 1:9) {
+    i <- (l-1)*9 + k
+    g <- Maine.pheno.plots$Plot[i][[1]]    
+    assign(paste("p",k,sep=""),g)
   }
+  grid.arrange(p1,p2,p3,p4,p5,p6,p7,p8,p9,nrow=3)
 }
+dev.off()
 
-compare.dist <- inner_join(logistic_fits,logistic_biosim) %>%
-  rowwise() %>%
-  mutate(coverage=logistic_overlap(obs_params,bio_params)) %>%
-  dplyr::filter(!is.na(coverage)) %>%
-  left_join(compare.points)
-
-compare.worst <- compare.dist %>% dplyr::filter(coverage < 0.5) %>% mutate(year = fct_relevel(year,as.character(1972:1980)))
-ggplot(compare.dist,aes(y=coverage)) + geom_boxplot(aes(color=year))
-
-ggplot(compare.dist,aes(x=coverage,y=obs_5p)) + geom_point(aes(color=year))
 ```
-# GAM analysis
+
+## Empirical detection of immigratiom events
+
+The patterns of trap captures at individual traps are often quite complex, showing multimodal distributions, unexpectedly long or short flight periods (Appendix 1). Three main factors could affect flight captures: weather conditions during larval development could potentially affect the duration of the adult emergence period thus increasing or decreasing the flight period, weather conditions (temperature and precipitation) during the flight period could temporarly prevent flight, finally immigration in the vicinity to the trap could induce a peak of capture.
+
+Let's start with immigration because any immigration event will affect the duration of the local flight period and the temporal pattern of moths capture during the flight season, so it will blur the effects of the other factors. An immigration event can be characterized by:
+- Sharp increase in daily captures
+- Large number of moths captured in a single day
+- Large proportion of the total number of moaths captured in a single day
+- Way past the peak of pupation
+
+For the first criteria, we use the Hampel filter: for each trap, for each sampled day, we compute the median of a window composed of the sample and its four surrounding sample days, two per side. We also estimate the standard deviation of each rolling sample using the median absolute deviation. If a sample differs from the median by more than three standard deviations, it is considered as an outlier.
 
 ```{r}
-#| eval: false
-result <- data.frame(result)
-res <- data.frame(id=result$id)
-res$temp <- as.matrix(result[,grepl("temp",names(result))])
-res$lag <- as.matrix(result[,grepl("lag",names(result))])
+hampel <- function(x, k = 5, t = 3) {
+  n <- length(x)
+  idx <- logical(n)
+  for (i in (k+1):(n-k)) {
+    window <- x[(i-k):(i+k)]
+    med  <- median(window, na.rm = TRUE)
+    mad  <- median(abs(window - med), na.rm = TRUE)
+    idx[i] <- abs(x[i] - med) > t * 1.4826 * mad
+  }
+  idx
+}
 
-compare.gam <- left_join(compare.dist,res)
+InFlights <- Maine.tb %>% group_by(id) %>% summarise(
+  InFlights = list({
+    temp <- Moths %>% 
+      pluck(1) %>% 
+      right_join(tibble(DOY=166:227,NoMoth=0)) %>% 
+      arrange(DOY) %>% 
+      rowwise() %>% 
+      mutate(Final=sum(Moths,NoMoth,na.rm=TRUE)) %>%
+      ungroup() %>%
+      mutate(Final.prop=Final/sum(Final))
 
-test <- gam(obs_midpoint~te(temp,lag,k=15),data=compare.gam,method="REML",control=list(keepData=TRUE),family=gaussian())
-summary(test)
+  temp[which(hampel(temp$Final)),"DOY"] %>% pull(DOY)
+  })
+)
 
-### Plot 1
-# first construct a grid of prediction locations in lag and temperature
-plot_grid <- expand.grid(temp = seq(min(compare.gam$temp, na.rm=TRUE),
-                                    max(compare.gam$temp, na.rm=TRUE),
-                                    length.out=200),
-                         lag  = 0:max(compare.gam$lag))
+Maine.tb <- left_join(Maine.tb,InFlights)
+```
 
-# find the per-lag max/min values
-data_locs <- data.frame(temp = as.numeric(compare.gam$temp),
-                        lag = as.numeric(compare.gam$lag)) %>%
-  group_by(lag) %>%
-  summarize(tmin = min(temp),
-            tmax = max(temp))
+The second criteria is subjective and depends on the size of the local population (e.g., if the trap is in a defoliated area, local captures will be relatively high). 
 
-# only want to plot in the range of observed temperatures
-# so throw-out those outwith the range
-plot_grid <- plot_grid %>%
-  left_join(data_locs) %>%
-  filter(temp >= tmin & temp<=tmax)
+```{r}
 
-pr <- predict(test, plot_grid, type="terms")
-plot_grid$p <- pr[,1]
+# Let's plot the distribution of daily captures for all the traps and years
+do.call(rbind,Maine.tb$Moths) %>% dplyr::filter(Moths<1000) %>% ggplot(aes(x=Moths)) + geom_freqpoly(binwidth=50) 
 
-lag_breaks <- seq(0, 181, by=14)
-lag_labels <- format(ymd("1970-01-01") + lag_breaks, "%d %b")
+# It looks like 150 would be a good threshold, but the number "100" appears often in the data suggesting
+# than counts might have been rounded to this number when they exceeded it so, let's take 100 
+Daily_threshold <- 100
 
-# finally make the plot
-p_dl_effect <- ggplot(plot_grid) +
-  geom_tile(aes(x=temp, y=lag, fill=p)) +
-  geom_contour(aes(x=temp, y=lag, z=p)) +
-  metR::geom_text_contour(aes(x=temp, y=lag, z=p),
-           rotate=FALSE, label.placer = metR::label_placer_flattest()) +
-  scale_fill_gradient2(low = scales::muted("blue"),
-                       high = scales::muted("red")) +
-  scale_y_continuous(breaks=lag_breaks, labels=lag_labels) +
-  labs(x="Temperature (C)", y="Lag date", fill="Distributed\nlag effect") +
-  theme_minimal() +
-  coord_cartesian(expand=FALSE)
-p_dl_effect
+Large_Capture <- Maine.tb %>% group_by(id) %>% summarise(
+  Large_capture = list({
+    Moths %>% pluck(1) %>% dplyr::filter(Moths>=Daily_threshold) %>% pull(DOY)
+  })
+)
 
-### Plot 2
-# plot_grid <- expand.grid(temp = seq(min(compare.gam$temp, na.rm=TRUE),
-#                                     max(compare.gam$temp, na.rm=TRUE),
-#                                     length.out=200),
-#                          lag  = seq(0, max(compare.gam$lag)))
+Maine.tb <- left_join(Maine.tb,Large_Capture)
+```
 
-plot_grid <- expand.grid(temp = seq(-10,15,length.out=200),
-                         lag  = seq(0, max(compare.gam$lag)))
+The third criteria requires to calculate the proportion of moths captured at each trap each year
 
-                         # build the Lp matrix, the design matrix for predictions
-                         lp <- predict(test, plot_grid, type="lpmatrix")
+```{r}
+Proportion <- Maine.tb %>% 
+  group_by(id) %>% 
+  summarise( 
+    Moths = list({
+      Moths %>% pluck(1) %>% mutate(Moths.prop=Moths/sum(Moths))
+    })
+  )
 
-                         # simulate from the posterior of the model
-                         bs <- rmvn(1000, coef(test), vcov(test))
-                         # zero the intercept
-                         bs[, 1] <- 0
+# Let's plot the distribution of daily proportions
+do.call(rbind,Proportion$Moths) %>% ggplot(aes(x=Moths.prop)) + geom_freqpoly() 
+# It lloks like 0.25 would be good threshold
+Proportion_threshold <- 0.25
 
-                         # calculate predictions
-                         pr <- lp%*%t(bs)
+Large_Proportion <- Proportion %>% group_by(id) %>% summarise(
+  Large_proportion = list({
+    Moths %>% pluck(1) %>% dplyr::filter(Moths.prop>=Proportion_threshold) %>% pull(DOY)
+  })
+)
 
-                         plot_grid$lower <- NA
-                         plot_grid$upper <- NA
-                         plot_grid$p <- NA
+Maine.tb <- left_join(Maine.tb,Large_Proportion)
+```
 
-                         # for each temperature...
-                         for(t in unique(plot_grid$temp)){
-                           # calculate the per-temperature, per-simulation effect
-                             temps <- apply(pr[plot_grid$temp==t, ], 2, sum)
+```{r}
+Immigrants <- Maine.tb %>% group_by(id) %>% summarise(
+  Immigrants = list({
+    Pupae.max <- Pupae %>% pluck(1) %>% dplyr::filter(Pupae==max(Pupae)) %>% arrange(DOY) %>% dplyr::filter(row_number()==n()) %>% pull(DOY)
+    Intersect <- intersect(intersect(InFlights[[1]],Large_capture[[1]]),Large_proportion[[1]])
+    Intersect[Intersect>=(Pupae.max+10)]
+  })
+)
 
-                               # now get summary statistics over the posterior samples
-                                 qs <- quantile(temps, prob=c(0.025, 0.975))
-                                   plot_grid[plot_grid$temp==t,]$lower <- qs[1]
-                                     plot_grid[plot_grid$temp==t,]$upper <- qs[2]
-                                       plot_grid[plot_grid$temp==t,]$p <- median(temps)
-                                       }
-
-                                       # make data for the rug plot
-                                       temprug <- data.frame(temp=c(sa$temp))
-
-                                       # finally make the plot
-                                       p_temp_marginal <- ggplot(plot_grid) +
-                                         geom_ribbon(aes(x=temp, ymin=lower, ymax=upper), alpha=0.6) +
-                                           geom_line(aes(x=temp, y=p)) +
-                                             geom_rug(aes(x=temp), data=temprug) +
-                                               labs(x="Temperature (C)", y="Marginal effect") +
-                                                 theme_minimal()
-                                                 p_temp_marginal
-                                                 
+Maine.tb <- left_join(Maine.tb,Immigrants)
 
 ```
 
+```{r}
+Maine.pheno.plots.2 <- Maine.tb %>%
+  arrange(Year) %>%
+  group_by(Year,id) %>%
+  summarise(Plot = list({
+    M <- Moths[[1]]
+    P <- Pupae[[1]]
+    I <- Immigrants[[1]]
+    W <- Weather[[1]] %>% mutate(DOY=as.double(format(Date,"%j"))) %>% dplyr::select(DOY,tmax,tmin,tavg)
+    T1 <- full_join(M,P)
+    T2 <- T1 %>% mutate(Moths.prop=Moths/sum(Moths,na.rm=TRUE), InFlights=ifelse(DOY %in% I,"*",NA))
+    T3 <- T1 %>% arrange(DOY) %>% mutate(Moths=Moths/sum(Moths,na.rm=TRUE),Pupae=Pupae/sum(Pupae,na.rm=TRUE)) %>% pivot_longer(cols=c("Moths","Pupae"),names_to="Stage",values_to="Proportion") %>% left_join(T2) %>% mutate(InFlights=ifelse(Stage=="Moths",InFlights,NA)) %>% left_join(.,W)
+    scale_factor <- max(T3$Proportion,na.rm=TRUE)/max(T3$tmax)
+    ggplot(T3,aes(x=DOY,y=Proportion,fill=Stage)) + 
+      geom_bar(stat="identity",position="dodge") + 
+      geom_text(aes(label=InFlights),position=position_dodge(0.9),vjust=0,size=6) +
+      geom_line(aes(y = tmin * scale_factor),color="grey") +
+      geom_line(aes(y = tavg * scale_factor)) +
+      geom_line(aes(y = tmax * scale_factor),color="grey") +
+      geom_hline(yintercept=15*scale_factor,linetype=2) +
+      scale_y_continuous(
+        name = "Proportion",
+        sec.axis = sec_axis(~ . / scale_factor, name = "Temperature (degC)")) + 
+      ggtitle(id)  
+  }))
+
+pdf(file="Maine_pheno_with_inflights_and_temp.pdf",width=9,height=6)
+maxpage <- floor(nrow(Maine.tb)/4)
+for (l in 1:maxpage) {
+  for (k in 1:4) {
+    i <- (l-1)*4 + k
+    g <- Maine.pheno.plots.2$Plot[i][[1]]    
+    assign(paste("p",k,sep=""),g)
+  }
+  grid.arrange(p1,p2,p3,p4,nrow=2)
+}
+dev.off()
+```
+
+```{r}
+Maine.clean <- Maine.tb %>% dplyr::filter(length(unlist(Immigrants))==0) %>% dplyr::select(-InFlights,-Large_capture,-Large_proportion,-Immigrants)
+
+# write_rds(Maine.clean,file="Maine_clean.rds")
+```
+
+## Characteristics of flight season
+
+here we want to explore the timing and the duration of the flight season and how there spatial and temporal variation. We first fit each site*year capture data to a cumulative Gaussian function to account for sparse, skewed or multimodal series.
+
+```{r}
+# ── Fit cumulative Gaussian (probit) curve to each site-year ──────────────────
+
+fit_cumulative_gaussian <- function(moths_df, min_days = 5) {
+  
+  if (is.null(moths_df) || nrow(moths_df) < min_days) return(NULL)
+  if (sum(moths_df$Moths) == 0) return(NULL)
+  
+  # Sort by DOY and build cumulative count
+  moths_df  <- moths_df[order(moths_df$DOY), ]
+  doy       <- moths_df$DOY
+  count     <- moths_df$Moths
+  N         <- sum(count)
+  cumul     <- cumsum(count)           # observed cumulative captures
+  cumul_pct <- cumul / N               # scale to [0, 1] for fitting
+  
+  # ── Starting values from count-weighted moments ───────────────────────────
+  doy_exp <- rep(doy, count)
+  mu0     <- mean(doy_exp)
+  sig0    <- max(sd(doy_exp), 3)
+  
+  # ── NLS fit of cumulative normal CDF ──────────────────────────────────────
+  fit <- tryCatch(
+    nls(
+      cumul_pct ~ pnorm(doy, mean = mu, sd = sigma),
+      start     = list(mu = mu0, sigma = sig0),
+      control   = nls.control(maxiter = 200, warnOnly = TRUE),
+      algorithm = "port",
+      lower     = c(mu = min(doy) - 10, sigma = 0.5),
+      upper     = c(mu = max(doy) + 10, sigma = 60)
+    ),
+    error   = function(e) NULL,
+    warning = function(w) suppressWarnings(
+      nls(
+        cumul_pct ~ pnorm(doy, mean = mu, sd = sigma),
+        start   = list(mu = mu0, sigma = sig0),
+        control = nls.control(maxiter = 500)
+      )
+    )
+  )
+  
+  if (is.null(fit)) return(NULL)
+  
+  coefs <- coef(fit)
+  mu    <- coefs["mu"]
+  sigma <- abs(coefs["sigma"])
+  
+  # ── Percentiles: analytical from fitted normal ─────────────────────────────
+  p05 <- qnorm(0.05, mu, sigma)
+  p50 <- mu                            # 50th percentile = mu by definition
+  p95 <- qnorm(0.95, mu, sigma)
+  
+  # ── Goodness of fit: R² on cumulative percentage scale ────────────────────
+  fitted_pct <- pnorm(doy, mu, sigma)
+  ss_res <- sum((cumul_pct - fitted_pct)^2)
+  ss_tot <- sum((cumul_pct - mean(cumul_pct))^2)
+  r2     <- ifelse(ss_tot == 0, NA, 1 - ss_res / ss_tot)
+  
+  # ── Max absolute residual (in percentage units) ────────────────────────────
+  max_resid <- max(abs(cumul_pct - fitted_pct))
+  
+  data.frame(
+    mu        = round(mu,        2),
+    sigma     = round(sigma,     2),
+    p05       = round(p05,       1),
+    p50       = round(p50,       1),
+    p95       = round(p95,       1),
+    duration     = round(p95 - p05, 1),
+    r2        = round(r2,        4),
+    max_resid = round(max_resid, 4),   # max deviation from fitted CDF (0–1 scale)
+    n_days    = nrow(moths_df),
+    n_moths   = N
+  )
+}
+
+df <- Maine.clean
+
+# ── Apply to all site-years ───────────────────────────────────────────────────
+flight_cumul <- do.call(rbind, lapply(seq_len(nrow(df)), function(i) {
+  result <- fit_cumulative_gaussian(df$Moths[[i]])
+  if (is.null(result)) return(NULL)
+  cbind(
+    data.frame(
+      id       = df$id[i],
+      location = df$Location[i],
+      year     = df$Year[i],
+      lat      = df$Latitude[i],
+      lon      = df$Longitude[i],
+      defoliation = df$Defoliation[i]
+    ),
+    result
+  )
+}))
+
+write_rds(flight_cumul,file="flight_cumul.rds")
+
+```
+
+The mean peak flight date occurs on July 12th (mean DOY=193.1, median DOY=193.8, sd=5.2), the earliest was June 24th and the lastest July 24th. The duration of the flight period (p95-p05) was 12.2 days on average (median=11.1, sd=6.4) with a minimum of 1.6 days and a maximum of 32.3 days. 
+
+```{r}
+library(patchwork)
+
+# ── Linear model summaries ────────────────────────────────────────────────────
+lm_p50_lat <- lm(p50      ~ lat,  data = flight_cumul)
+lm_dur_lat <- lm(duration ~ lat,  data = flight_cumul)
+lm_p50_lon <- lm(p50      ~ lon,  data = flight_cumul)
+lm_dur_lon <- lm(duration ~ lon,  data = flight_cumul)
+
+rbind(
+  data.frame(response = "p50",      predictor = "lat",  t(round(coef(summary(lm_p50_lat))[2, ], 4))),
+  data.frame(response = "duration", predictor = "lat",  t(round(coef(summary(lm_dur_lat))[2, ], 4))),
+  data.frame(response = "p50",      predictor = "lon",  t(round(coef(summary(lm_p50_lon))[2, ], 4))),
+  data.frame(response = "duration", predictor = "lon",  t(round(coef(summary(lm_dur_lon))[2, ], 4)))
+)
+
+# ── 4-panel plot ──────────────────────────────────────────────────────────────
+
+p1 <- ggplot(flight_cumul, aes(lat, p50)) +
+  geom_point(aes(size = log10(n_moths)), alpha = 0.5, colour = "steelblue") +
+  geom_smooth(method = "lm", colour = "steelblue", fill = "steelblue", alpha = 0.2) +
+  scale_size_continuous(range = c(1, 5), guide = "none") +
+  labs(x = "Latitude (°N)", y = "p50 (DOY)", title = "Peak flight date vs latitude") +
+  theme_bw()
+
+p2 <- ggplot(flight_cumul, aes(lon, p50)) +
+  geom_point(aes(size = log10(n_moths)), alpha = 0.5, colour = "steelblue") +
+  geom_smooth(method = "lm", colour = "steelblue", fill = "steelblue", alpha = 0.2) +
+  scale_size_continuous(range = c(1, 5), guide = "none") +
+  labs(x = "Longitude (°N)", y = "p50 (DOY)", title = "Peak flight date vs longitude") +
+  theme_bw()
+
+p3 <- ggplot(flight_cumul, aes(lat, duration)) +
+  geom_point(aes(size = log10(n_moths)), alpha = 0.5, colour = "darkorange") +
+  geom_smooth(method = "lm", colour = "darkorange", fill = "darkorange", alpha = 0.2) +
+  scale_size_continuous(range = c(1, 5), guide = "none") +
+  labs(x = "Latitude (°N)", y = "Duration (days)", title = "Flight duration vs latitude") +
+  theme_bw()
+
+p4 <- ggplot(flight_cumul, aes(lon, duration)) +
+  geom_point(aes(size = log10(n_moths)), alpha = 0.5, colour = "darkorange") +
+  geom_smooth(method = "lm", colour = "darkorange", fill = "darkorange", alpha = 0.2) +
+  scale_size_continuous(range = c(1, 5), guide = "none") +
+  labs(x = "Longitude (°N)", y = "Duration (days)", title = "Flight duration vs longitude") +
+  theme_bw()
+
+(p1 + p2)/(p3 + p4)
+```
+
+The peak flight date increases by 1.21 days per degree of latitude (sd=0.4, p=0.004) but is not affected by longitude. Duration does not significantly change with latitude or longitude. 
+
+## Testing the effect of temperature on flight timing
+
+```{r}
+# ── Fit cumulative Gaussian (probit) curve to each site-year ──────────────────
+
+fit_cumulative_gaussian_pupae <- function(pupae_df, min_days = 5) {
+  
+  if (is.null(pupae_df) || nrow(pupae_df) < min_days) return(NULL)
+  if (sum(pupae_df$Pupae) == 0) return(NULL)
+  
+  # Sort by DOY and build cumulative count
+  pupae_df  <- pupae_df[order(pupae_df$DOY), ]
+  doy       <- pupae_df$DOY
+  count     <- pupae_df$Pupae
+  N         <- sum(count)
+  cumul     <- cumsum(count)           # observed cumulative captures
+  cumul_pct <- cumul / N               # scale to [0, 1] for fitting
+  
+  # ── Starting values from count-weighted moments ───────────────────────────
+  doy_exp <- rep(doy, count)
+  mu0     <- mean(doy_exp)
+  sig0    <- max(sd(doy_exp), 3)
+  
+  # ── NLS fit of cumulative normal CDF ──────────────────────────────────────
+  fit <- tryCatch(
+    nls(
+      cumul_pct ~ pnorm(doy, mean = mu, sd = sigma),
+      start     = list(mu = mu0, sigma = sig0),
+      control   = nls.control(maxiter = 200, warnOnly = TRUE),
+      algorithm = "port",
+      lower     = c(mu = min(doy) - 10, sigma = 0.5),
+      upper     = c(mu = max(doy) + 10, sigma = 60)
+    ),
+    error   = function(e) NULL,
+    warning = function(w) suppressWarnings(
+      nls(
+        cumul_pct ~ pnorm(doy, mean = mu, sd = sigma),
+        start   = list(mu = mu0, sigma = sig0),
+        control = nls.control(maxiter = 500)
+      )
+    )
+  )
+  
+  if (is.null(fit)) return(NULL)
+  
+  coefs <- coef(fit)
+  mu    <- coefs["mu"]
+  sigma <- abs(coefs["sigma"])
+  
+  # ── Percentiles: analytical from fitted normal ─────────────────────────────
+  p05 <- qnorm(0.05, mu, sigma)
+  p50 <- mu                            # 50th percentile = mu by definition
+  p95 <- qnorm(0.95, mu, sigma)
+  
+  # ── Goodness of fit: R² on cumulative percentage scale ────────────────────
+  fitted_pct <- pnorm(doy, mu, sigma)
+  ss_res <- sum((cumul_pct - fitted_pct)^2)
+  ss_tot <- sum((cumul_pct - mean(cumul_pct))^2)
+  r2     <- ifelse(ss_tot == 0, NA, 1 - ss_res / ss_tot)
+  
+  # ── Max absolute residual (in percentage units) ────────────────────────────
+  max_resid <- max(abs(cumul_pct - fitted_pct))
+  
+  data.frame(
+    p05.pupae       = round(p05,       1),
+    p50.pupae       = round(p50,       1),
+    p95.pupae       = round(p95,       1),
+    duration.pupae     = round(p95 - p05, 1)
+  )
+}
+
+df <- Maine.clean
+
+# ── Apply to all site-years ───────────────────────────────────────────────────
+pupae_cumul <- do.call(rbind, lapply(seq_len(nrow(df)), function(i) {
+  result <- fit_cumulative_gaussian_pupae(df$Pupae[[i]])
+  if (is.null(result)) return(NULL)
+  cbind(
+    data.frame(
+      id       = df$id[i]
+    ),
+    result
+  )
+}))
+
+# Pheno contains the delay between pupae and flight
+pheno <- left_join(Maine.clean,flight_cumul) %>% 
+  left_join(pupae_cumul) %>% 
+  mutate(delay=p50-p50.pupae) %>% 
+  dplyr::select(id,year,n_moths,p05,p50,p95,p05.pupae,p50.pupae,p95.pupae,duration,duration.pupae,delay,Weather)
+
+pheno <- pheno |>
+  rowwise() |>
+  mutate(
+    p50_pupae_doy = as.integer(p50.pupae),
+    p50_doy       = as.integer(p50),
+    tavg_p50pupae = {
+      w   <- Weather          # already a single tibble in rowwise context
+      doy <- as.integer(format(w$Date, "%j"))
+      doy <- ifelse(lubridate::leap_year(year(w$Date)), doy - 1L, doy)
+      w$tavg[match(p50_pupae_doy, doy)]
+    },
+    tavg_cumsum = {
+      w   <- Weather
+      doy <- as.integer(format(w$Date, "%j"))
+      doy <- ifelse(lubridate::leap_year(year(w$Date)), doy - 1L, doy)
+      sum(pmax(0,w$tavg[doy >= p50_pupae_doy & doy <= p50_doy]-15), na.rm = TRUE)
+    }
+  ) |>
+  dplyr::select(-p50_pupae_doy, -p50_doy) |>
+  ungroup()
+
+ggplot(pheno, aes(tavg_cumsum, delay)) +
+  geom_point(aes(size = log10(n_moths)), alpha = 0.5, colour = "darkorange") +
+  geom_smooth(method = "lm", colour = "darkorange", fill = "darkorange", alpha = 0.2) +
+  scale_size_continuous(range = c(1, 5), guide = "none") +
+  labs(x = "Degree Days from pupation", y = "Flight delay", title = "Flight delay vs cumulative temperature") +
+  theme_bw()
+
+ggplot(pheno, aes(tavg_p50pupae, delay)) +
+  geom_point(aes(size = log10(n_moths)), alpha = 0.5, colour = "darkorange") +
+  geom_smooth(method = "lm", colour = "darkorange", fill = "darkorange", alpha = 0.2) +
+  scale_size_continuous(range = c(1, 5), guide = "none") +
+  labs(x = "Degree Days from pupation", y = "Flight delay", title = "Flight delay vs p50 pupae temperature") +
+  theme_bw()
+
+ggplot(pheno, aes(duration.pupae, delay)) +
+  geom_point(aes(size = log10(n_moths)), alpha = 0.5, colour = "darkorange") +
+  geom_smooth(method = "lm", colour = "darkorange", fill = "darkorange", alpha = 0.2) +
+  scale_size_continuous(range = c(1, 5), guide = "none") +
+  labs(x = "Degree Days from pupation", y = "Flight delay", title = "Flight delay vs p50 pupae temperature") +
+  theme_bw()
+
+
+```
+
+
+
+## Flight predictions
+
+### Data preparation
+
+```{r}
+# Join flight_cumul and Maine.clean to recuperate the flight characteristics
+# and filter out the observations with extreme flight duration (< or > sd(duration))
+flight_cumul <- read_rds("flight_cumul.rds")
+Maine.clean <- read_rds("Maine_clean.rds")
+
+duration.min <- mean(flight_cumul$duration)-sd(flight_cumul$duration)
+duration.max <- mean(flight_cumul$duration)+sd(flight_cumul$duration)
+
+# The resulting dataset has 129 observations
+Maine.super.clean <- left_join(Maine.clean,flight_cumul) %>%
+  dplyr::filter(duration >= duration.min & duration <= duration.max)
+
+write_rds(Maine.super.clean,file="Maine_super_clean.rds")
+
+```
+
+### Convolution Model
+
+Based on our lab experiment, the duration of pupal development varies between 5 and 10 days at constant lab temperature. After some visual inspection [using ggplot(data.frame(x=1:20,k=make_dev_kernel(7,0.89,max_days = 20)),aes(x=x,y=k)) + geom_line()] we suggest the following starting values for the pupal development kernel: max_day=20, shape=7, rate=0.89.
+
+```{r}
+library(bbmle)
+
+# Helper: expand sparse tibble to full DOY vector of length 365
+expand_to_365 <- function(tb, col) {
+  tibble(DOY = 1:365) |>
+    left_join(tb, by = "DOY") |>
+    mutate({{ col }} := replace_na(pull(pick({{ col }}), {{ col }}), 0)) |>
+    pull({{ col }})
+}
+
+make_dev_kernel <- function(shape, rate, max_days = 20) {
+  k <- dgamma(seq_len(max_days), shape = shape, rate = rate)
+  k / sum(k)
+}
+
+predict_emergence <- function(pup_vec, shape, rate, max_days = 20) {
+  kernel <- make_dev_kernel(shape, rate, max_days)
+  conv   <- convolve(pup_vec, rev(kernel), type = "open")
+  conv[seq_len(365)]
+}
+
+nll_conv <- function(log_shape, log_rate, log_size, log_scale,
+                     pup_vec, obs_vec) {
+  shape <- exp(log_shape); rate  <- exp(log_rate)
+  size  <- exp(log_size);  scale <- exp(log_scale)
+  pred  <- predict_emergence(pup_vec, shape, rate) * scale
+  pred  <- pmax(pred, 1e-10)
+  -sum(dnbinom(obs_vec, mu = pred, size = size, log = TRUE))
+}
+
+fit_one <- function(moths_tb, pupae_tb) {
+  obs_vec <- expand_to_365(moths_tb, Moths)
+  pup_vec <- expand_to_365(pupae_tb, Pupae)
+  pup_vec <- pup_vec / (sum(pup_vec) + 1e-10)   # normalise to PMF
+
+  tryCatch(
+    mle2(
+      nll_conv,
+      start  = list(log_shape = log(7), log_rate = log(0.89),
+                    log_size  = log(5), log_scale = log(sum(obs_vec))),
+      data   = list(pup_vec = pup_vec, obs_vec = obs_vec),
+      method = "Nelder-Mead"
+    ),
+    error = function(e) NULL
+  )
+}
+
+# Fit all rows in Maine.clean
+Maine.fits <- Maine.super.clean |>
+  rowwise() |>
+  mutate(
+    fit     = list(fit_one(Moths, Pupae)),
+    converged = !is.null(fit),
+    shape   = if (converged) exp(coef(fit)[["log_shape"]]) else NA_real_,
+    rate    = if (converged) exp(coef(fit)[["log_rate"]])  else NA_real_,
+    mean_dev_days = if (converged) shape / rate else NA_real_,  # gamma mean
+    pred    = if (converged) list({
+      pup_vec <- expand_to_365(Pupae, Pupae) 
+      pup_vec <- pup_vec / (sum(pup_vec) + 1e-10)
+      scale   <- exp(coef(fit)[["log_scale"]])
+      tibble(DOY = 1:365,
+             pred_Moths = predict_emergence(pup_vec, shape, rate) * scale)
+    }) else list(NULL)
+  ) |>
+  ungroup()
+
+# Example: inspect one site
+i <- 4
+obs  <- Maine.super.clean$Moths[[i]] 
+pred <- Maine.fits$pred[[i]]
+
+left_join(pred, obs, by = "DOY") |>
+  pivot_longer(c(pred_Moths, Moths), names_to = "type", values_to = "count") |>
+  dplyr::filter(DOY > 160, DOY < 240, !is.na(count)) |>
+  ggplot(aes(DOY, count, color = type)) +
+  geom_line(data = ~ dplyr::filter(.x, type == "pred_Moths")) +
+  geom_col(data = ~ dplyr::filter(.x, type == "Moths"), fill = "steelblue", alpha = 0.5, width = 0.8) +
+  labs(title = Maine.fits$id[[i]], y = "Moths", color = NULL) +
+  theme_bw()
+```
+
+### Convolution model with kernel parameters treated as random effects across site-years
+
+```{r}
+
+```
 
 {{< pagebreak >}}
 
@@ -641,23 +869,39 @@ plot_grid <- expand.grid(temp = seq(-10,15,length.out=200),
 
 ::: {.landscape}
 ```{r}
-#| label: cap-distrib
+#| label: fig-individidual-traps
 #| fig-cap: "Distribution of moth capture at each trap"
 #| fig-width: 10
 #| fig-height: 7
 
+# Create dataset with trap captures and temperature
+Maine_weather <- read.csv("maine_trap_weather_data.csv")
+
+plot.dat <- Maine_weather %>% 
+  dplyr::filter(DOY > 165 & DOY < 221) %>%
+  dplyr::mutate(id=as.character(id)) %>%
+  arrange(id,DOY) %>%
+  left_join(Maine.dat) %>%
+  mutate(Moths=ifelse(is.na(Moths),0,Moths))
+
 # Plot flight dynamics
 Plot.obs <- function(i) {
-  Obs.dat <- Obs[Obs$id == i,]
-  tmp <- rep(Obs.dat$date,Obs.dat$sumday)
+  Obs.dat <- plot.dat[plot.dat$id == i,]
+  tmp <- rep(Obs.dat$DOY,Obs.dat$Moths)
   Obs.dat$median <- wtd.quantile(tmp,q=0.5)
-  Obs.dat$sumday.cumsum <- cumsum(Obs.dat$sumday)/sum(Obs.dat$sumday)
-  g <- ggplot(Obs.dat,aes(x=date)) + 
-    geom_col(aes(y=sumday),fill="steelblue") +
-    geom_point(aes(y=sumday.cumsum*max(sumday))) +
+  Obs.dat$Moths.frac <- Obs.dat$Moths/sum(Obs.dat$Moths)
+  Obs.dat$Moths.cumsum <- cumsum(Obs.dat$Moths.frac)
+  g <- ggplot(Obs.dat,aes(x=DOY)) + 
+    geom_col(aes(y=Moths.frac),fill="steelblue") +
+    geom_point(aes(y=Moths.cumsum)) +
+    geom_line(aes(y=Moths.cumsum)) +    
+    geom_line(aes(y=tmin/40),col="blue") +
+    geom_hline(yintercept = 16/40,color="darkgreen") +
+    geom_line(aes(y=tmax/40),col="red") +
+    geom_col(aes(y=prcp/40),col="purple",width=0.2) +
     scale_y_continuous(
       name = "Moths captured",
-      sec.axis = sec_axis(~ . / max(Obs.dat$sumday), name = "Cumulative proportion")
+      sec.axis = sec_axis(~ . * 40, name = "Temperature")
     ) +
     labs(
       title =paste("Lat:",substr(Obs.dat$id,1,2),".",substr(Obs.dat$id,3,4),
@@ -667,32 +911,35 @@ Plot.obs <- function(i) {
     ) +
     theme(plot.title=element_text(size=7))
 
-# Get predictions from observed logistic
-  if (i %in% logistic_fits$id) {
-    obs.m <- logistic_fits[logistic_fits$id == i,"obs_fit"]$obs_fit[[1]]
-    if (!is.null(obs.m)) {
-      pred_dates <- seq(166, 243)
-      pred_values <- predict(obs.m, newdata = data.frame(date = pred_dates))*max(Obs.dat$sumday)
-      pred_df <- data.frame(date = pred_dates, pred = pred_values)
-      g <- g + geom_line(data = pred_df, aes(x = date, y = pred), color = "darkblue", linewidth = 1)
-   }
-  }
- 
-# Get predictions from Biosim logistic
-  if (i %in% logistic_biosim$id) {
-    bio.m <- logistic_biosim[logistic_biosim$id == i,"bio_fit"]$bio_fit[[1]]
-    if (!is.null(bio.m)) {
-     pred_dates <- seq(166, 243)
-      pred_values <- predict(bio.m, newdata = data.frame(date = pred_dates))*max(Obs.dat$sumday)
-      pred_df <- data.frame(date = pred_dates, pred = pred_values)
-      g <- g + geom_line(data = pred_df, aes(x = date, y = pred), color = "red", linewidth = 1)
-    }
-  }
- 
   return(g)
 }
 
-ids <- unique(Obs$id)
+# # Get predictions from observed logistic
+#   if (i %in% logistic_fits$id) {
+#     obs.m <- logistic_fits[logistic_fits$id == i,"obs_fit"]$obs_fit[[1]]
+#     if (!is.null(obs.m)) {
+#       pred_dates <- seq(166, 243)
+#       pred_values <- predict(obs.m, newdata = data.frame(DOY = pred_dates))*max(Obs.dat$sumday)
+#       pred_df <- data.frame(date = pred_dates, pred = pred_values)
+#       g <- g + geom_line(data = pred_df, aes(x = date, y = pred), color = "darkblue", linewidth = 1)
+#    }
+#   }
+ 
+#  # Get predictions from observed Weibull
+#   if (i %in% weibull_fits$id) {
+#     obs.m <- weibull_fits[weibull_fits$id == i,"weibull_params"]$weibull_params[[1]]
+#     if (!is.null(obs.m)) {
+#       pred_dates <- seq(166, 243)
+#       pred_values <- pweibull(pred_dates, shape = obs.m$shape, scale = obs.m$scale)*max(Obs.dat$sumday)
+#       pred_df <- data.frame(DOY = pred_dates, pred = pred_values)
+#       g <- g + geom_line(data = pred_df, aes(x = DOY, y = pred), color = "lightblue", linewidth = 1)
+#    }
+#   }
+  
+#   return(g)
+# }
+
+ids <- plot.dat %>% group_by(id) %>% slice(1) %>% arrange(Year) %>% pull(id)
 maxpage <- floor(length(ids)/9)
 for (l in 1:maxpage) {
   for (k in 1:9) {
@@ -705,3 +952,4 @@ for (l in 1:maxpage) {
 
 ```
 :::
+
