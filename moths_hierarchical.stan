@@ -153,7 +153,7 @@ generated quantities {
 
   // ── Peak emergence DOY ────────────────────────────────────────────────────────
   // Day of year with the highest predicted emergence probability
-  vector[N] int peak_doy;
+  vector[N] peak_doy;
   for (i in 1:N) {
     real norm = 0;
     real weighted_t = 0;
